@@ -1,0 +1,169 @@
+server:
+    port: 8082  # 启动端口
+    address: 0.0.0.0  # 绑定到所有网络接口，支持localhost和内网IP同时访问
+
+debug: false
+
+spring:
+  profiles:
+    default: local
+  threads:
+    virtual:
+      enabled: true
+  servlet:
+      multipart:
+          max-file-size: 100MB
+          max-request-size: 1000MB
+          enabled: true
+  data:
+      mongodb:
+        database: landcheck
+        uri: mongodb://landcheck_user:123@localhost:27017/landcheck?authSource=landcheck&retryWrites=false&replicaSet=rs0
+        pool:
+          max-size: 200
+          min-size: 20
+          max-idle-time-ms: 60000
+          max-connection-life-time-ms: 0
+          max-wait-time-ms: 5000
+          wait-queue-timeout-ms: 5000
+      redis:
+          host: localhost
+          database: 0
+          port: 6379
+          password: 123
+
+springdoc:
+    api-docs:
+        enabled: true
+        path: /v3/api-docs
+    swagger-ui:
+        enabled: true
+        path: /swagger-ui.html
+    packages-to-scan:
+    - com.gov.landcheck.start
+    - com.gov.landcheck.file
+    - com.gov.landcheck.user
+    - com.gov.landcheck.core
+    - com.gov.landcheck.project
+
+# Sa-Token
+sa-token:
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false   # 每次登录颁发新 token，避免多端/多次登录共用一个令牌
+  token-style: uuid
+  is-log: false
+  is-read-header: true
+  is-read-cookie: true
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.gov.landcheck: DEBUG
+    org.apache.pdfbox: ERROR
+  # file:
+  #   name: E:/dev/Code/Java/landcheck/backend/debug_output/logs/landcheck.log
+  # logback:
+  #   rollingpolicy:
+  #     max-file-size: 10MB
+  #     max-history: 30
+  #     total-size-cap: 1GB
+
+# 项目统一配置（landcheck）
+landcheck:
+  # 安全：匿名路径（不校验登录）；全局限流（Redis 按 IP 计数）
+  security:
+    anon-paths:
+      - /error
+      - /auth/login
+      - /auth/register
+      - /auth/user-types
+      # 未登录时 /auth/me 由 Sa-Token 返回 401，无需加入匿名列表
+      - /v3/api-docs/**
+      - /swagger-ui
+      - /swagger-ui/**
+      - /swagger-ui.html
+      - /doc.html
+      - /webjars/**
+      - /favicon.ico
+    rate-limit:
+      enabled: true
+      # 单 IP 每秒最大请求数
+      per-ip-per-second: 100
+      # 默认的用户每窗口最大次数、窗口长度（秒）
+      per-user-per-window: 3
+      user-window-seconds: 1
+      skip-path-prefixes:
+        - /webjars/
+        - /swagger-ui
+        - /v3/api-docs
+        - /doc.html
+        - /favicon.ico
+        - /error
+  # RocketMQ 异步消息：项目封装配置（连接由下方 rocketmq.* 配置）
+  rocketmq:
+    enabled: true
+    serializer: json
+    producer:
+      send-timeout-ms: 5000
+      retry-times-when-send-failed: 3
+    consumer:
+      consume-thread-min: 4
+      consume-thread-max: 16
+  # MQ：生产端限流与消费端幂等
+  mq:
+    rate-limit:
+      enabled: true
+      tps: 5
+    idempotent:
+      enabled: true
+      ttl-seconds: 86400
+      key-prefix: "mq:idempotent:"
+  # PDF 预处理（conda 环境 SR：opencv-python、pymupdf、Pillow、scipy 等）
+  file:
+    preprocess:
+      conda-env: SR
+    processing:
+      # 上传：宽队列 + 适度并发（排队几乎不占 PDF 内存，同时执行数才占内存）
+      upload-pool:
+        core-size: 4
+        max-size: 4
+        queue-capacity: 0
+      # 解析：可慢，严格限并发防 OOM
+      parse-pool:
+        core-size: 2
+        max-size: 3
+        queue-capacity: 512
+      thumbnail-dpi: 120
+      gate-acquire-timeout-ms: 30000
+      auto-parse:
+        enabled: true
+        defer-ms: 5000
+        max-pending: 2000
+        retry-delay-ms: 5000
+      concurrency:
+        max-active-parse-pipelines: 2
+        max-python-preprocess: 1
+  # OCR 解析服务
+  ocr:
+    api:
+      url: http://localhost:8080/layout-parsing
+      timeout: 300000  # 300秒
+  # LLM 大模型
+  llm:
+    api:
+      url: https://ark.cn-beijing.volces.com/api/v3
+      key: d49096a7-91b1-41b6-9362-7431861c3e7a
+      timeout-seconds: 240
+      model: doubao-seed-2-0-pro-260215
+      vision-model: doubao-seed-2-0-pro-260215
+
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: lc-producer-group
+    send-message-timeout: 5000
+    retry-times-when-send-failed: 3

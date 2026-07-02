@@ -1,0 +1,62 @@
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+
+.cursor/
+
+# Local env overrides (do not commit)
+.env
+**/.env
+!**/.env.example
+
+python_demo/
+
+*.pdf
+*.md
+*.py
+*.log
+*.zip
+*.gz
+
+
+# Added by code-review-graph
+.code-review-graph/
+
+# RocketMQ 数据与运行日志（勿提交）
+docker/rocketmq/broker/store/*
+!docker/rocketmq/broker/store/.gitkeep
+docker/rocketmq/broker/logs/*
+!docker/rocketmq/broker/logs/.gitkeep
+docker/rocketmq/nameserver/logs/*
+!docker/rocketmq/nameserver/logs/.gitkeep

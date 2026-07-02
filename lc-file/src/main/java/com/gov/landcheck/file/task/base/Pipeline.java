@@ -1,0 +1,133 @@
+package com.gov.landcheck.file.task.base;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 命令管道
+ * 按顺序编排并执行 Command 序列，支持 Builder 模式构建
+ *
+ * @author system
+ * @date 2026/02/28
+ */
+@Slf4j
+public class Pipeline {
+
+    private final List<Command> commands;
+    private final String pipelineName;
+
+    Pipeline(String pipelineName, List<Command> commands) {
+        this.pipelineName = pipelineName;
+        this.commands = new ArrayList<>(commands);
+    }
+
+    /**
+     * 创建管道构建器
+     */
+    public static PipelineBuilder of(String name) {
+        return new PipelineBuilder(name);
+    }
+
+    /**
+     * 创建包含指定命令的管道
+     */
+    public static Pipeline of(Command... commands) {
+        return new Pipeline("DefaultPipeline", Arrays.asList(commands));
+    }
+
+    /**
+     * 执行管道中的所有命令
+     *
+     * @param taskData 任务数据上下文
+     * @throws TaskException 当任意命令执行失败时抛出
+     */
+    public void execute(TaskData taskData) throws TaskException {
+        log.debug("开始执行管道: {}，包含 {} 个命令", pipelineName, commands.size());
+
+        for (int i = 0; i < commands.size(); i++) {
+            Command command = commands.get(i);
+            String commandInfo = String.format("[%d/%d] %s", i + 1, commands.size(), command.getName());
+            int startProgress = Math.round((i * 100.0f) / commands.size());
+            int endProgress = Math.round(((i + 1) * 100.0f) / commands.size());
+
+            try {
+                if (command.canSkip(taskData)) {
+                    taskData.skipStage(command.getStage(), command.getName(), "条件跳过", endProgress);
+                    log.debug("跳过命令执行: {}", commandInfo);
+                    continue;
+                }
+
+                taskData.startStage(command.getStage(), command.getName(), null, startProgress);
+                log.debug("开始执行命令: {}", commandInfo);
+                long startTime = System.currentTimeMillis();
+
+                command.execute(taskData);
+                taskData.completeStage(command.getStage(), null, endProgress);
+
+                long duration = System.currentTimeMillis() - startTime;
+                log.debug("命令执行完成: {}，耗时: {}ms", commandInfo, duration);
+
+            } catch (TaskException e) {
+                taskData.failCurrentStage(e.getMessage());
+                log.error("命令执行失败: {}，错误: {}", commandInfo, e.getMessage());
+
+                throw e;
+            } catch (Exception e) {
+                taskData.failCurrentStage(e.getMessage());
+                log.error("命令执行异常: {}，异常: {}", commandInfo, e.getMessage(), e);
+
+                throw new TaskException(
+                        TaskException.ErrorCode.SYSTEM_ERROR,
+                        command.getStage(),
+                        taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
+                        taskData.getParseJob() != null ? taskData.getParseJob().getId() : null,
+                        String.format("命令执行异常: %s", command.getName()),
+                        e
+                );
+            }
+        }
+
+        log.debug("管道执行完成: {}", pipelineName);
+    }
+
+
+    /**
+     * 对管道中的全部命令按「后加入先回滚」顺序执行回滚。
+     * 用于任务取消或 Task 层 fallback 时做一次完整清理，与 execute 内按「已执行命令」的回滚互补。
+     *
+     * @param taskData 任务数据上下文
+     */
+    public void rollbackAll(TaskData taskData) {
+        if (taskData == null || commands == null || commands.isEmpty()) {
+            return;
+        }
+        log.warn("开始执行管道全量回滚: pipeline={}, commandCount={}", pipelineName, commands.size());
+        for (int i = commands.size() - 1; i >= 0; i--) {
+            Command cmd = commands.get(i);
+            try {
+                log.debug("回滚命令: name={}, stage={}", cmd.getName(), cmd.getStage());
+                cmd.rollback(taskData);
+            } catch (Exception ex) {
+                log.warn("命令回滚失败: name={}, stage={}, error={}",
+                        cmd.getName(), cmd.getStage(), ex.getMessage(), ex);
+            }
+        }
+    }
+
+    /**
+     * 获取管道中的命令列表（只读）
+     */
+    public List<Command> getCommands() {
+        return new ArrayList<>(commands);
+    }
+
+    /**
+     * 获取管道名称
+     */
+    public String getPipelineName() {
+        return pipelineName;
+    }
+}
