@@ -1,18 +1,11 @@
 package com.gov.landcheck.user.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
-import cn.hutool.crypto.SecureUtil;
-import com.gov.landcheck.core.bo.R.AjaxJson;
-import com.gov.landcheck.core.bo.entity.SysUser;
-import com.gov.landcheck.core.common.MessageConstant;
-import com.gov.landcheck.core.common.UserTypeConstants;
-import com.gov.landcheck.core.config.query.MongoQueryBuilder;
-import com.gov.landcheck.user.dto.RegisterRequest;
-import com.gov.landcheck.user.dto.UserDTO;
-import com.gov.landcheck.user.dto.UserQueryDTO;
-import com.gov.landcheck.user.dto.UserVO;
-import com.gov.landcheck.user.service.SysUserService;
-import lombok.extern.slf4j.Slf4j;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -23,12 +16,22 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import com.gov.landcheck.core.bo.R.AjaxJson;
+import com.gov.landcheck.core.bo.entity.SysUser;
+import com.gov.landcheck.core.common.MessageConstant;
+import com.gov.landcheck.core.common.UserTypeConstants;
+import com.gov.landcheck.core.config.query.MongoQueryBuilder;
+import com.gov.landcheck.user.dto.ProfileUpdateRequest;
+import com.gov.landcheck.user.dto.RegisterRequest;
+import com.gov.landcheck.user.dto.UserDTO;
+import com.gov.landcheck.user.dto.UserQueryDTO;
+import com.gov.landcheck.user.dto.UserVO;
+import com.gov.landcheck.user.service.SysUserService;
+
+import cn.dev33.satoken.stp.StpUtil;
+import cn.hutool.crypto.SecureUtil;
 import jakarta.annotation.Resource;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 系统用户服务实现类
@@ -85,8 +88,8 @@ public class SysUserServiceImpl implements SysUserService {
             // 生成自增ID
             sysUser.preSave();
 
-            // 保存到数据库
-            mongoTemplate.save(sysUser);
+            // 新用户必须 insert，避免 sequence 落后时 save 按 _id 覆盖已有账号
+            mongoTemplate.insert(sysUser);
 
             log.info("创建用户成功: username={}, id={}", sysUser.getUsername(), sysUser.getId());
             return AjaxJson.getSuccess("创建用户成功");
@@ -117,7 +120,7 @@ public class SysUserServiceImpl implements SysUserService {
             sysUser.setCreateTime(LocalDateTime.now());
             sysUser.setUpdateTime(LocalDateTime.now());
             sysUser.preSave();
-            mongoTemplate.save(sysUser);
+            mongoTemplate.insert(sysUser);
             log.info("用户注册成功: username={}, id={}", username, sysUser.getId());
             return AjaxJson.getSuccess("注册成功，请登录");
         } catch (Exception e) {
@@ -132,6 +135,62 @@ public class SysUserServiceImpl implements SysUserService {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    @Override
+    public AjaxJson updateProfile(ProfileUpdateRequest request) {
+        try {
+            long userId = StpUtil.getLoginIdAsLong();
+            Optional<SysUser> userOpt = getUserById(userId);
+            if (userOpt.isEmpty()) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, MessageConstant.USER_NOT_EXIST);
+            }
+            SysUser user = userOpt.get();
+
+            user.setRealName(request.getRealName().trim());
+            user.setPhone(blankToNull(request.getPhone()));
+            user.setEmail(blankToNull(request.getEmail()));
+
+            if (StringUtils.hasText(request.getNewPassword())) {
+                if (!StringUtils.hasText(request.getOldPassword())) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "修改密码需提供原密码");
+                }
+                String newPassword = request.getNewPassword();
+                if (newPassword.length() < 6 || newPassword.length() > 20) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "新密码长度必须在6-20个字符之间");
+                }
+                if (!verifyPasswordForLogin(user, request.getOldPassword())) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, MessageConstant.USER_PASSWORD_ERROR);
+                }
+                user.setPassword(userPasswordEncoder.encode(newPassword));
+            }
+
+            user.setUpdateTime(LocalDateTime.now());
+            mongoTemplate.save(user);
+
+            log.info("用户更新个人信息: id={}, username={}", user.getId(), user.getUsername());
+            return AjaxJson.getSuccessData(toUserVO(user));
+        } catch (Exception e) {
+            log.error("更新个人信息失败: error={}", e.getMessage(), e);
+            return AjaxJson.getError("更新个人信息失败: " + e.getMessage());
+        }
+    }
+
+    private static UserVO toUserVO(SysUser user) {
+        UserVO vo = new UserVO();
+        vo.setId(user.getId());
+        vo.setUsername(user.getUsername());
+        vo.setRealName(user.getRealName());
+        vo.setPhone(user.getPhone());
+        vo.setEmail(user.getEmail());
+        vo.setRoleId(user.getRoleId());
+        vo.setDeptId(user.getDeptId());
+        vo.setUserType(user.getUserType());
+        vo.setIsActive(user.getIsActive());
+        vo.setCreateTime(user.getCreateTime());
+        vo.setUpdateTime(user.getUpdateTime());
+        vo.setLastLogin(user.getLastLogin());
+        return vo;
     }
 
     @Override

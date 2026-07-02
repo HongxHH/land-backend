@@ -23,19 +23,21 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.gov.landcheck.core.bo.R.AjaxJson;
+import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
+import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.common.MessageConstant;
+import com.gov.landcheck.core.common.UserTypeConstants;
 import com.gov.landcheck.core.enums.FileContextType;
-import com.gov.landcheck.file.dto.FileUploadDTO;
 import com.gov.landcheck.file.dto.FileQueryDTO;
-import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
+import com.gov.landcheck.file.dto.FileUploadDTO;
 import com.gov.landcheck.file.dto.TaskStatusDTO;
-import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 import com.gov.landcheck.file.service.FileService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.model.GridFSFile;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.hutool.core.io.IoUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -208,6 +210,7 @@ public class FileController {
     }
 
     @GetMapping("/task/status")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "查询任务执行状态", description = "获取当前正在执行的任务、排队等待的任务以及线程池状态信息")
     public AjaxJson getTaskStatus() {
         try {
@@ -219,6 +222,7 @@ public class FileController {
     }
 
     @GetMapping("/task/detail/{taskId}")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "查询单任务详细进度", description = "返回单个任务当前阶段、进度和阶段轨迹")
     public AjaxJson getTaskDetail(@Parameter(description = "任务ID") @PathVariable String taskId) {
         try {
@@ -251,6 +255,7 @@ public class FileController {
     }
 
     @PostMapping("/task/cancel/{taskId}")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "按任务ID取消任务", description = "通过taskId直接取消任务，适合任务监控面板使用")
     public AjaxJson cancelTaskByTaskId(
             @Parameter(description = "任务ID") @PathVariable String taskId,
@@ -267,6 +272,7 @@ public class FileController {
     }
 
     @GetMapping("/task/system-status")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "查询系统运行状态", description = "获取系统CPU/内存/线程/连接池/GPU等运行信息")
     public AjaxJson getSystemRuntimeStatus() {
         try {
@@ -278,6 +284,7 @@ public class FileController {
     }
 
     @PostMapping("/task/pool-size")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "动态调整任务线程池参数", description = "在线调整核心线程数与最大线程数")
     public AjaxJson updateTaskPoolSize(@Valid @RequestBody ThreadPoolResizeDTO resizeDTO) {
         try {

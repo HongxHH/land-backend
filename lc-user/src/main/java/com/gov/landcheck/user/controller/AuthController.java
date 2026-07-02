@@ -1,27 +1,31 @@
 package com.gov.landcheck.user.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.SysUser;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.common.UserTypeConstants;
 import com.gov.landcheck.user.dto.LoginRequest;
+import com.gov.landcheck.user.dto.ProfileUpdateRequest;
 import com.gov.landcheck.user.dto.RegisterRequest;
 import com.gov.landcheck.user.dto.UserVO;
 import com.gov.landcheck.user.service.SysUserService;
+
+import cn.dev33.satoken.stp.StpUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Optional;
 
 /**
  * 登录 / 登出（Sa-Token）；{@code /auth/login} 在配置中为匿名接口。
@@ -107,7 +111,16 @@ public class AuthController {
         if (opt.isEmpty()) {
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, MessageConstant.USER_NOT_EXIST);
         }
-        SysUser user = opt.get();
+        return AjaxJson.getSuccessData(buildUserVO(opt.get()));
+    }
+
+    @Operation(summary = "修改当前用户个人信息", description = "可修改姓名、手机、邮箱；修改密码需提供原密码")
+    @PutMapping("/profile")
+    public AjaxJson updateProfile(@Valid @RequestBody ProfileUpdateRequest request) {
+        return sysUserService.updateProfile(request);
+    }
+
+    private static UserVO buildUserVO(SysUser user) {
         UserVO vo = new UserVO();
         vo.setId(user.getId());
         vo.setUsername(user.getUsername());
@@ -121,6 +134,6 @@ public class AuthController {
         vo.setCreateTime(user.getCreateTime());
         vo.setUpdateTime(user.getUpdateTime());
         vo.setLastLogin(user.getLastLogin());
-        return AjaxJson.getSuccessData(vo);
+        return vo;
     }
 }

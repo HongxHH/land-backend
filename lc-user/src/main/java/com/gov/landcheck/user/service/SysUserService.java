@@ -1,14 +1,14 @@
 package com.gov.landcheck.user.service;
 
+import java.util.List;
+import java.util.Optional;
+
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.SysUser;
+import com.gov.landcheck.user.dto.ProfileUpdateRequest;
 import com.gov.landcheck.user.dto.RegisterRequest;
 import com.gov.landcheck.user.dto.UserDTO;
 import com.gov.landcheck.user.dto.UserQueryDTO;
-import com.gov.landcheck.user.dto.UserVO;
-
-import java.util.List;
-import java.util.Optional;
 
 /**
  * 系统用户服务接口
@@ -30,6 +30,11 @@ public interface SysUserService {
      * 自助注册（固定为普通用户 {@link com.gov.landcheck.core.common.UserTypeConstants#USER}）。
      */
     AjaxJson register(RegisterRequest request);
+
+    /**
+     * 当前登录用户修改个人信息。
+     */
+    AjaxJson updateProfile(ProfileUpdateRequest request);
 
     /**
      * 更新用户信息
