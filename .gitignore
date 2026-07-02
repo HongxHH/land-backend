@@ -42,6 +42,9 @@ build/
 
 python_demo/
 
+__pycache__/
+*.pyc
+
 *.pdf
 *.md
 *.py
