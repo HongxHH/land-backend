@@ -58,6 +58,26 @@ public class SysUserServiceImpl implements SysUserService {
         StpUtil.checkRoleOr(UserTypeConstants.SUPER_ADMIN, UserTypeConstants.ADMIN);
     }
 
+    private static String currentActorType() {
+        Object sessionValue = StpUtil.getSession().get("userType");
+        String actorType = sessionValue instanceof String value ? value : null;
+        return UserTypeConstants.LEGACY_DEPT_USER.equals(actorType) ? UserTypeConstants.USER : actorType;
+    }
+
+    private static AjaxJson rejectIfActorCannotAssignUserType(String actorType, String newUserType,
+            String currentTargetType) {
+        if (!UserTypeConstants.ADMIN.equals(actorType)) {
+            return null;
+        }
+        if (UserTypeConstants.SUPER_ADMIN.equals(newUserType)) {
+            return AjaxJson.getNotJur("管理员无权将用户设为超级管理员");
+        }
+        if (UserTypeConstants.SUPER_ADMIN.equals(currentTargetType)) {
+            return AjaxJson.getNotJur("管理员不可修改超级管理员账号的权限类型");
+        }
+        return null;
+    }
+
     @Override
     public AjaxJson createUser(UserDTO userDTO) {
         requireMgmtRole();
@@ -65,6 +85,11 @@ public class SysUserServiceImpl implements SysUserService {
             if (!UserTypeConstants.isAssignable(userDTO.getUserType())) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
                         "用户类型无效，允许：SUPER_ADMIN（超级管理员）、ADMIN（管理员）、DEVELOPER（开发人员）、USER（普通用户）");
+            }
+            AjaxJson permissionDenied = rejectIfActorCannotAssignUserType(currentActorType(), userDTO.getUserType(),
+                    null);
+            if (permissionDenied != null) {
+                return permissionDenied;
             }
             // 检查用户名是否已存在
             if (existsByUsername(userDTO.getUsername())) {
@@ -201,15 +226,7 @@ public class SysUserServiceImpl implements SysUserService {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
                         "用户类型无效，允许：SUPER_ADMIN、ADMIN、DEVELOPER、USER");
             }
-            String actorType = (String) StpUtil.getSession().get("userType");
-            if (UserTypeConstants.LEGACY_DEPT_USER.equals(actorType)) {
-                actorType = UserTypeConstants.USER;
-            }
-            if (UserTypeConstants.ADMIN.equals(actorType)) {
-                if (UserTypeConstants.SUPER_ADMIN.equals(newUserType)) {
-                    return AjaxJson.getNotJur("管理员无权将用户设为超级管理员");
-                }
-            }
+            String actorType = currentActorType();
 
             Optional<SysUser> targetOpt = getUserById(userId);
             if (targetOpt.isEmpty()) {
@@ -217,9 +234,9 @@ public class SysUserServiceImpl implements SysUserService {
             }
             SysUser target = targetOpt.get();
             String currentType = target.getUserType();
-            if (UserTypeConstants.ADMIN.equals(actorType)
-                    && UserTypeConstants.SUPER_ADMIN.equals(currentType)) {
-                return AjaxJson.getNotJur("管理员不可修改超级管理员账号的权限类型");
+            AjaxJson permissionDenied = rejectIfActorCannotAssignUserType(actorType, newUserType, currentType);
+            if (permissionDenied != null) {
+                return permissionDenied;
             }
 
             if (newUserType.equals(currentType)) {
@@ -258,6 +275,11 @@ public class SysUserServiceImpl implements SysUserService {
             }
 
             SysUser existingUser = existingUserOpt.get();
+            AjaxJson permissionDenied = rejectIfActorCannotAssignUserType(currentActorType(), userDTO.getUserType(),
+                    existingUser.getUserType());
+            if (permissionDenied != null) {
+                return permissionDenied;
+            }
             existingUser.setUsername(userDTO.getUsername());
 
             // 如果密码不为空，则更新密码

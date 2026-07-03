@@ -192,16 +192,18 @@ public class DataFillReceiver {
             return;
         }
 
-        // 4.1 清除旧的房间信息
-        Query deleteQuery = new Query(Criteria.where("file_record_id").is(taskData.getFileRecord().getId()));
-        mongoTemplate.remove(deleteQuery, RoomInfo.class);
-
-        // 4.2 插入新的房间信息
+        // 4.1 先写入新房间，再清理旧房间，避免插入失败时丢失上一版可用数据。
         for (RoomInfo roomInfo : roomInfos) {
             roomInfo.setSurveyReportInfoId(surveyReportInfo.getId());
             roomInfo.preSave();
         }
         mongoTemplate.insertAll(roomInfos);
+        List<Long> newRoomIds = roomInfos.stream().map(RoomInfo::getId).toList();
+
+        // 4.2 清除旧的房间信息
+        Query deleteQuery = new Query(Criteria.where("file_record_id").is(taskData.getFileRecord().getId())
+                .and("_id").nin(newRoomIds));
+        mongoTemplate.remove(deleteQuery, RoomInfo.class);
 
         syncSurveyContractApproval(surveyReportInfo.getProjectId());
         publish(ProjectDataChangedEvent.surveyReportChanged(surveyReportInfo.getProjectId(), surveyReportInfo.getId(),
@@ -346,9 +348,6 @@ public class DataFillReceiver {
         ProjectPartySurveySummaryForm parsed = taskData.getProjectPartySummaryForm();
         if (parsed == null) {
             throw new IllegalStateException("项目方汇总回填失败：解析主表为空");
-        }
-        if (parsed.getDeclaredTotals() == null || !parsed.getDeclaredTotals().hasAnyDeclaredField()) {
-            throw new IllegalStateException("项目方汇总回填失败：解析汇总数据为空");
         }
 
         Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));

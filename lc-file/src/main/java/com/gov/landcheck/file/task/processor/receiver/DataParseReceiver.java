@@ -150,7 +150,7 @@ public class DataParseReceiver {
     /**
      * 关键产物守卫：
      * - 合同：必须至少抽取出1个字段；
-     * - 项目方汇总：必须有主表；declaredTotals 可为 null（无汇总区块），若有则至少一个字段非空方可回填。
+     * - 项目方汇总：必须有主表；declaredTotals 可为 null（无汇总区块），回填为 PARTIAL 状态。
      */
     private void enforceCriticalOutput(FileContextType contextType, ParseResult result) {
         if (contextType == null || result == null) {
@@ -166,7 +166,7 @@ public class DataParseReceiver {
                 if (result.getProjectPartySummaryForm() == null) {
                     throw new IllegalStateException("项目方汇总缺少主表数据，判定为不可恢复错误");
                 }
-                // 解析产物允许 declaredTotals 为 null（无汇总）；回填要求至少一字段非空，见 DataFillReceiver
+                // 解析产物允许 declaredTotals 为 null（无汇总），回填时保留 PARTIAL 状态和说明。
             }
             case SURVEY_REPORT -> {
                 if (result.getRoomInfos() == null || result.getRoomInfos().isEmpty()) {

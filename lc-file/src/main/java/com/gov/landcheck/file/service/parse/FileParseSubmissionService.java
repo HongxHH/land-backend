@@ -14,14 +14,11 @@ import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.bo.entity.PlanningReviewForm;
 import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
 import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
-import com.gov.landcheck.core.bo.entity.RoomInfo;
-import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
-import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.file.dto.SubmitParseResult;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.InvalidGridFsFileCleanup;
@@ -52,8 +49,6 @@ public class FileParseSubmissionService {
     @Lazy
     @Resource
     private InvalidGridFsFileCleanup invalidGridFsFileCleanup;
-    @Resource
-    private UnknownUsageRecordService unknownUsageRecordService;
 
     /**
      * 按文件记录 ID 查询最新一条解析任务（按创建时间降序）。
@@ -204,22 +199,8 @@ public class FileParseSubmissionService {
             case CONTRACT, DATA_FILE, OTHER -> {
             }
             case SURVEY_REPORT -> {
-                long unknownDeleted = unknownUsageRecordService.deleteByFileRecordId(fileRecordId);
-                if (unknownDeleted > 0) {
-                    log.info("重新解析前已清理未知用途记录: fileRecordId={}, deleted={}", fileRecordId, unknownDeleted);
-                }
-                Query roomQuery = new Query(Criteria.where("file_record_id").is(fileRecordId));
-                long roomsDeleted = mongoTemplate.remove(roomQuery, RoomInfo.class).getDeletedCount();
-                if (roomsDeleted > 0) {
-                    log.info("重新解析前已清理房间数据: fileRecordId={}, deleted={}", fileRecordId, roomsDeleted);
-                }
-                Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-                Update update = SurveyReportFieldUpdates.reparseReset();
-                mongoTemplate.updateFirst(query, update, SurveyReportInfo.class);
-                SurveyReportInfo sr = mongoTemplate.findOne(query, SurveyReportInfo.class);
-                if (sr != null && sr.getProjectId() != null && sr.getId() != null) {
-                    publishCacheHint(ProjectDataChangedEvent.surveyReportChanged(sr.getProjectId(), sr.getId(), false));
-                }
+                // 实测报告重解析是异步执行；旧户室和校验字段必须等新解析成功回填时再替换，
+                // 否则 OCR/解析失败会把上一版已审核数据提前清空。
             }
             case PLANNING_REVIEW -> {
                 Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
