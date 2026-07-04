@@ -115,4 +115,19 @@ public enum FileContextType {
             default -> "";
         };
     }
+
+    /**
+     * 上传后自动进入延迟解析队列的内容类型（与 DeferredParseSubmissionService 对齐）。
+     */
+    public boolean isAutoParseContext() {
+        return this == CONTRACT
+                || this == SURVEY_REPORT
+                || this == PLANNING_REVIEW
+                || this == CAPACITY_INDICATOR
+                || this == PROJECT_PARTY_SURVEY_SUMMARY;
+    }
+
+    public static boolean isAutoParseContext(FileContextType contextType) {
+        return contextType != null && contextType.isAutoParseContext();
+    }
 }

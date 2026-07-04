@@ -24,18 +24,21 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
+import com.gov.landcheck.core.audit.OperatorContext;
+import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
+import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
-import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
 import com.gov.landcheck.file.dto.TaskStatusDTO;
-import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
-import com.gov.landcheck.core.audit.OperatorContext;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.ParseProgressAssembler;
 import com.gov.landcheck.file.service.UploadRecordService;
 import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseJobStageHelper;
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskPriority;
 import com.gov.landcheck.file.task.executor.ParseFileExecutor;
@@ -82,6 +85,9 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
 
     @Autowired
     private ParseProgressAssembler parseProgressAssembler;
+
+    @Autowired
+    private ParseArtifactCleanupService parseArtifactCleanupService;
 
     @Override
     public String executeParseTask(FileRecord fileRecord, FileStateEnum rollbackFileStateIfSubmitFails) {
@@ -207,17 +213,44 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
         if (parseJob == null || fileRecord == null) {
             return;
         }
-        TaskData taskData = new TaskData();
-        taskData.setFileRecord(fileRecord);
-        taskData.setParseJob(parseJob);
-        parseFileExecutor.rollback(taskData);
-        log.info("已回滚未运行解析任务的中间数据: fileRecordId={}, parseJobId={}",
-                fileRecord.getId(), parseJob.getId());
+        ParseJob latest = mongoTemplate.findById(parseJob.getId(), ParseJob.class);
+        if (latest != null) {
+            parseJob = latest;
+        }
+        TaskData taskData = ParseJobStageHelper.taskDataForOfflineRollback(parseJob, fileRecord);
+        ParseRollbackSummary summary = parseArtifactCleanupService.rollbackAllStages(parseJob, fileRecord, taskData);
+        if (summary.hasFailures()) {
+            log.warn("离线解析任务回滚存在失败项: fileRecordId={}, parseJobId={}, summary={}",
+                    fileRecord.getId(), parseJob.getId(), summary);
+        } else {
+            log.info("已回滚未运行解析任务的中间数据: fileRecordId={}, parseJobId={}, summary={}",
+                    fileRecord.getId(), parseJob.getId(), summary);
+        }
     }
 
     @Override
     public boolean isTaskRunning(String taskId) {
         return taskThreadPool.isTaskRunning(taskId);
+    }
+
+    @Override
+    public boolean awaitTaskIdle(String taskId, long timeoutMs) {
+        if (taskId == null || taskId.isBlank()) {
+            return true;
+        }
+        long deadline = System.currentTimeMillis() + Math.max(0L, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            if (!isTaskRunning(taskId)) {
+                return true;
+            }
+            try {
+                Thread.sleep(200L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return !isTaskRunning(taskId);
+            }
+        }
+        return !isTaskRunning(taskId);
     }
 
     /**

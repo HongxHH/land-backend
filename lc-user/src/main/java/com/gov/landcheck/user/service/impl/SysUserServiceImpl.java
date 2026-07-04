@@ -50,21 +50,19 @@ public class SysUserServiceImpl implements SysUserService {
     private BCryptPasswordEncoder userPasswordEncoder;
 
     /**
-     * 管理类写操作：与
-     * {@link com.gov.landcheck.core.config.satoken.LandcheckStpInterface#getRoleList}
-     * 一致，仅超级管理员或管理员。
+     * 用户管理写操作：仅超级管理员。
      */
-    private static void requireMgmtRole() {
-        StpUtil.checkRoleOr(UserTypeConstants.SUPER_ADMIN, UserTypeConstants.ADMIN);
+    private static void requireSuperAdminRole() {
+        StpUtil.checkRole(UserTypeConstants.SUPER_ADMIN);
     }
 
     @Override
     public AjaxJson createUser(UserDTO userDTO) {
-        requireMgmtRole();
+        requireSuperAdminRole();
         try {
             if (!UserTypeConstants.isAssignable(userDTO.getUserType())) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
-                        "用户类型无效，允许：SUPER_ADMIN（超级管理员）、ADMIN（管理员）、DEVELOPER（开发人员）、USER（普通用户）");
+                        "用户类型无效，允许：SUPER_ADMIN（超级管理员）、DEVELOPER（开发人员）、USER（普通用户）");
             }
             // 检查用户名是否已存在
             if (existsByUsername(userDTO.getUsername())) {
@@ -195,20 +193,11 @@ public class SysUserServiceImpl implements SysUserService {
 
     @Override
     public AjaxJson updateUserType(Long userId, String newUserType) {
-        requireMgmtRole();
+        requireSuperAdminRole();
         try {
             if (!UserTypeConstants.isAssignable(newUserType)) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
-                        "用户类型无效，允许：SUPER_ADMIN、ADMIN、DEVELOPER、USER");
-            }
-            String actorType = (String) StpUtil.getSession().get("userType");
-            if (UserTypeConstants.LEGACY_DEPT_USER.equals(actorType)) {
-                actorType = UserTypeConstants.USER;
-            }
-            if (UserTypeConstants.ADMIN.equals(actorType)) {
-                if (UserTypeConstants.SUPER_ADMIN.equals(newUserType)) {
-                    return AjaxJson.getNotJur("管理员无权将用户设为超级管理员");
-                }
+                        "用户类型无效，允许：SUPER_ADMIN、DEVELOPER、USER");
             }
 
             Optional<SysUser> targetOpt = getUserById(userId);
@@ -217,10 +206,6 @@ public class SysUserServiceImpl implements SysUserService {
             }
             SysUser target = targetOpt.get();
             String currentType = target.getUserType();
-            if (UserTypeConstants.ADMIN.equals(actorType)
-                    && UserTypeConstants.SUPER_ADMIN.equals(currentType)) {
-                return AjaxJson.getNotJur("管理员不可修改超级管理员账号的权限类型");
-            }
 
             if (newUserType.equals(currentType)) {
                 return AjaxJson.getSuccess("权限类型未变化");
@@ -239,12 +224,35 @@ public class SysUserServiceImpl implements SysUserService {
     }
 
     @Override
+    public AjaxJson updateUserPassword(Long userId, String newPassword) {
+        requireSuperAdminRole();
+        try {
+            Optional<SysUser> targetOpt = getUserById(userId);
+            if (targetOpt.isEmpty()) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+            }
+            SysUser target = targetOpt.get();
+
+            target.setPassword(userPasswordEncoder.encode(newPassword));
+            target.setUpdateTime(LocalDateTime.now());
+            mongoTemplate.save(target);
+
+            log.warn("[AUDIT] user_password_reset operatorId={} targetId={} targetUsername={}",
+                    StpUtil.getLoginIdDefaultNull(), userId, target.getUsername());
+            return AjaxJson.getSuccess("密码已更新");
+        } catch (Exception e) {
+            log.error("重置用户密码失败: userId={}, error={}", userId, e.getMessage(), e);
+            return AjaxJson.getError("重置用户密码失败: " + e.getMessage());
+        }
+    }
+
+    @Override
     public AjaxJson updateUser(Long userId, UserDTO userDTO) {
-        requireMgmtRole();
+        requireSuperAdminRole();
         try {
             if (!UserTypeConstants.isAssignable(userDTO.getUserType())) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
-                        "用户类型无效，允许：SUPER_ADMIN、ADMIN、DEVELOPER、USER");
+                        "用户类型无效，允许：SUPER_ADMIN、DEVELOPER、USER");
             }
             // 检查用户是否存在
             Optional<SysUser> existingUserOpt = getUserById(userId);
@@ -288,7 +296,7 @@ public class SysUserServiceImpl implements SysUserService {
 
     @Override
     public AjaxJson deleteUser(Long userId) {
-        requireMgmtRole();
+        requireSuperAdminRole();
         try {
             // 检查用户是否存在
             Optional<SysUser> userOpt = getUserById(userId);
@@ -381,7 +389,7 @@ public class SysUserServiceImpl implements SysUserService {
 
     @Override
     public AjaxJson toggleUserStatus(Long userId, Integer isActive) {
-        requireMgmtRole();
+        requireSuperAdminRole();
         try {
             // 检查用户是否存在
             Optional<SysUser> userOpt = getUserById(userId);

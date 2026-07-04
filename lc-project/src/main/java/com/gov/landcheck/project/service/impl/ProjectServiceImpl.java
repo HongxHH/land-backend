@@ -9,8 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.MongoTransactionException;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
@@ -21,14 +21,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import com.gov.landcheck.core.audit.AuditOperation;
+import com.gov.landcheck.core.audit.FileOperationAuthorization;
 import com.gov.landcheck.core.audit.OperationType;
+import com.gov.landcheck.core.audit.OperatorContext;
 import com.gov.landcheck.core.audit.TargetType;
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.ContractInfo;
 import com.gov.landcheck.core.bo.entity.FileArchive;
 import com.gov.landcheck.core.bo.entity.FileRecord;
-import com.gov.landcheck.core.bo.entity.OCRExecutionResult;
 import com.gov.landcheck.core.bo.entity.LandParcel;
+import com.gov.landcheck.core.bo.entity.OCRExecutionResult;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.bo.entity.ParsedDataHeader;
 import com.gov.landcheck.core.bo.entity.ParsedDataItem;
@@ -45,16 +47,16 @@ import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
 import com.gov.landcheck.core.enums.FileStateEnum;
-import com.gov.landcheck.core.enums.ProjectStatusEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
+import com.gov.landcheck.core.enums.ProjectStatusEnum;
 import com.gov.landcheck.core.enums.SurveyValidationStatusEnum;
 import com.gov.landcheck.core.service.IFileArchiveService;
 import com.gov.landcheck.core.service.SurveyReportCalculationService;
 import com.gov.landcheck.core.utils.ProjectTimeUtil;
 import com.gov.landcheck.project.cache.ProjectCacheKeys;
+import com.gov.landcheck.project.dto.ProjectDetailQueryResultDTO;
 import com.gov.landcheck.project.dto.ProjectQueryDTO;
 import com.gov.landcheck.project.dto.ProjectQueryResultDTO;
-import com.gov.landcheck.project.dto.ProjectDetailQueryResultDTO;
 import com.gov.landcheck.project.dto.ProjectUpdateDTO;
 import com.gov.landcheck.project.service.ContractAndLandParcelService;
 import com.gov.landcheck.project.service.ProjectAreaComparisonService;
@@ -62,8 +64,8 @@ import com.gov.landcheck.project.service.ProjectService;
 import com.gov.landcheck.project.utils.DynamicUpdateHelper;
 import com.gov.landcheck.project.utils.PageSortSupport;
 import com.gov.landcheck.project.vo.ContractProjectStatsVO;
-import com.gov.landcheck.project.vo.ProjectVO;
 import com.gov.landcheck.project.vo.ProjectDetailVO;
+import com.gov.landcheck.project.vo.ProjectVO;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -165,6 +167,7 @@ public class ProjectServiceImpl implements ProjectService {
         Project project = new Project();
         project.setProjectName(projectName.trim());
         project.setProjectTime(normalizedProjectTime);
+        project.setCreatedBy(OperatorContext.getOperatorId());
         try {
             Set<String> directKeys = new HashSet<>();
             directKeys.add(projectCacheKeys.allProjects());
@@ -285,6 +288,9 @@ public class ProjectServiceImpl implements ProjectService {
             Project project = mongoTemplate.findById(projectId, Project.class);
             if (project == null) {
                 return AjaxJson.getError("项目不存在或已删除");
+            }
+            if (!FileOperationAuthorization.canDeleteProject(project)) {
+                return AjaxJson.getError(FileOperationAuthorization.denyReasonForProjectDelete());
             }
             String msg = checkProjectFilesAndTasksBeforeDelete(projectId);
             if (msg != null) {

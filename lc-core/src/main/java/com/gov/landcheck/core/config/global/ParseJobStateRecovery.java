@@ -1,6 +1,7 @@
 package com.gov.landcheck.core.config.global;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
@@ -32,6 +33,9 @@ public class ParseJobStateRecovery implements ApplicationRunner {
     @Autowired
     private MongoTemplate mongoTemplate;
 
+    @Autowired(required = false)
+    private ParseJobRecoveryContributor parseJobRecoveryContributor;
+
     @Override
     public void run(ApplicationArguments args) {
         try {
@@ -52,38 +56,45 @@ public class ParseJobStateRecovery implements ApplicationRunner {
      * 将状态为 PENDING 或 RUNNING 的任务标记为 FAILED
      */
     private void recoverHangingParseJobs() {
-        // 查询所有处于进行中状态的解析任务
         Query query = new Query(Criteria.where("job_status").in(
-            ParseJobStateEnum.PENDING.getCode(),
-            ParseJobStateEnum.RUNNING.getCode()
-        ));
+                ParseJobStateEnum.PENDING.getCode(),
+                ParseJobStateEnum.RUNNING.getCode()));
+        List<ParseJob> hangingJobs = mongoTemplate.find(query, ParseJob.class);
+
+        if (parseJobRecoveryContributor != null && !hangingJobs.isEmpty()) {
+            try {
+                parseJobRecoveryContributor.cleanupBeforeMarkFailed(hangingJobs);
+            } catch (Exception ex) {
+                log.error("悬挂解析任务中间产物清理失败，将继续更新状态: {}", ex.getMessage(), ex);
+            }
+        }
 
         Update update = new Update()
-            .set("job_status", ParseJobStateEnum.FAILED.getCode())
-            .set("error_message", "任务因程序重启而被中断")
-            .set("finished_at", LocalDateTime.now());
+                .set("job_status", ParseJobStateEnum.FAILED.getCode())
+                .set("error_message", "任务因程序重启而被中断")
+                .set("finished_at", LocalDateTime.now());
 
-        // 执行批量更新
         long updatedCount = mongoTemplate.updateMulti(query, update, ParseJob.class).getModifiedCount();
         log.debug("已恢复 {} 个悬挂的解析任务状态", updatedCount);
     }
 
     /**
-     * 恢复悬挂的文件记录状态
-     * 将状态为 PENDING 或 PARSING 的文件标记为 PARSE_FAIL
+     * 恢复悬挂的文件记录状态：PENDING 回滚为 WAITING_PARSE，PARSING 标记为 PARSE_FAIL。
      */
     private void recoverHangingFileRecords() {
-        // 查询所有处于解析中状态的文件记录
-        Query query = new Query(Criteria.where("file_state").in(
-            FileStateEnum.PENDING.getCode(),
-            FileStateEnum.PARSING.getCode()
-        ));
+        Query pendingQuery = new Query(Criteria.where("file_state").is(FileStateEnum.PENDING.getCode()));
+        Update pendingUpdate = new Update()
+                .set("file_state", FileStateEnum.WAITING_PARSE.getCode())
+                .unset("parse_job_id")
+                .unset("auto_parse_queued_at");
+        long pendingCount = mongoTemplate.updateMulti(pendingQuery, pendingUpdate, FileRecord.class).getModifiedCount();
+        log.debug("已将 {} 个 PENDING 文件恢复为 WAITING_PARSE", pendingCount);
 
-        Update update = new Update()
-            .set("file_state", FileStateEnum.PARSE_FAIL.getCode());
-
-        // 执行批量更新
-        long updatedCount = mongoTemplate.updateMulti(query, update, FileRecord.class).getModifiedCount();
-        log.debug("已恢复 {} 个悬挂的文件记录状态", updatedCount);
+        Query parsingQuery = new Query(Criteria.where("file_state").is(FileStateEnum.PARSING.getCode()));
+        Update parsingUpdate = new Update()
+                .set("file_state", FileStateEnum.PARSE_FAIL.getCode())
+                .unset("preprocess_gridfs_id");
+        long parsingCount = mongoTemplate.updateMulti(parsingQuery, parsingUpdate, FileRecord.class).getModifiedCount();
+        log.debug("已将 {} 个 PARSING 文件恢复为 PARSE_FAIL", parsingCount);
     }
 }

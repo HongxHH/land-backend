@@ -1,5 +1,7 @@
 package com.gov.landcheck.file.task.base;
 
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
+
 /**
  * 命令接口 - 命令模式核心抽象
  * 每个命令代表任务处理管道中的一个处理阶段
@@ -29,11 +31,12 @@ public interface Command {
 
     /**
      * 回滚当前命令在本次任务执行中产生的所有副作用。
+     * 
      * @param taskData 任务数据上下文
      * @throws TaskException 回滚过程中发生的业务异常
      */
-    default void rollback(TaskData taskData) throws TaskException {
-        // 默认不做任何回滚，由具体命令按需实现
+    default ParseRollbackSummary rollback(TaskData taskData) throws TaskException {
+        return new ParseRollbackSummary();
     }
 
     /**

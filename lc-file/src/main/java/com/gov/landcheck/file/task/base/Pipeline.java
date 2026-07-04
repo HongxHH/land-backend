@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -85,36 +87,40 @@ public class Pipeline {
                         taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
                         taskData.getParseJob() != null ? taskData.getParseJob().getId() : null,
                         String.format("命令执行异常: %s", command.getName()),
-                        e
-                );
+                        e);
             }
         }
 
         log.debug("管道执行完成: {}", pipelineName);
     }
 
-
     /**
      * 对管道中的全部命令按「后加入先回滚」顺序执行回滚。
-     * 用于任务取消或 Task 层 fallback 时做一次完整清理，与 execute 内按「已执行命令」的回滚互补。
-     *
-     * @param taskData 任务数据上下文
+     * 由 Task 层 fallback / cancel 触发；失败时汇总各阶段清理结果便于观测。
      */
-    public void rollbackAll(TaskData taskData) {
+    public ParseRollbackSummary rollbackAll(TaskData taskData) {
+        ParseRollbackSummary summary = new ParseRollbackSummary();
         if (taskData == null || commands == null || commands.isEmpty()) {
-            return;
+            return summary;
         }
         log.warn("开始执行管道全量回滚: pipeline={}, commandCount={}", pipelineName, commands.size());
         for (int i = commands.size() - 1; i >= 0; i--) {
             Command cmd = commands.get(i);
             try {
                 log.debug("回滚命令: name={}, stage={}", cmd.getName(), cmd.getStage());
-                cmd.rollback(taskData);
+                ParseRollbackSummary stageSummary = cmd.rollback(taskData);
+                if (stageSummary != null) {
+                    summary.merge(stageSummary);
+                } else {
+                    summary.recordSuccess(cmd.getStage() + ": ok");
+                }
             } catch (Exception ex) {
+                summary.recordFailure(cmd.getStage(), ex.getMessage());
                 log.warn("命令回滚失败: name={}, stage={}, error={}",
                         cmd.getName(), cmd.getStage(), ex.getMessage(), ex);
             }
         }
+        return summary;
     }
 
     /**

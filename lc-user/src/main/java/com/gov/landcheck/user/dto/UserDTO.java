@@ -48,7 +48,7 @@ public class UserDTO {
     private Long deptId;
 
     @NotBlank(message = "用户类型不能为空")
-    @Schema(description = "用户类型：SUPER_ADMIN=超级管理员，ADMIN=管理员，DEVELOPER=开发人员，USER=普通用户", example = "USER")
+    @Schema(description = "用户类型：SUPER_ADMIN=超级管理员，DEVELOPER=开发人员，USER=普通用户", example = "USER")
     private String userType;
 
     @NotNull(message = "是否启用不能为空")

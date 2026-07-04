@@ -18,6 +18,8 @@ import com.gov.landcheck.core.bo.entity.ParsedDataItem;
 import com.gov.landcheck.file.dto.OCRPageResult;
 import com.gov.landcheck.file.dto.ParseResult;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
@@ -48,6 +50,9 @@ public class ParseCommand extends AbstractCommand {
 
     @Resource
     private GridFSUtils gridFSUtils;
+
+    @Resource
+    private ParseArtifactCleanupService parseArtifactCleanupService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -161,80 +166,15 @@ public class ParseCommand extends AbstractCommand {
         return false;
     }
 
-    /**
-     * 解析阶段回滚：
-     * - 删除当前 ParseJob 产生的 ParsedDataHeader / ParsedDataItem
-     * - 清理 TaskData 中的解析结果引用
-     */
     @Override
-    public void rollback(TaskData taskData) throws TaskException {
-        if (taskData == null || taskData.getParseJob() == null || taskData.getFileRecord() == null) {
-            return;
+    public ParseRollbackSummary rollback(TaskData taskData) throws TaskException {
+        var summary = parseArtifactCleanupService.rollbackParse(taskData);
+        if (summary.hasFailures()) {
+            log.warn("解析阶段回滚存在失败项: fileRecordId={}, summary={}",
+                    taskData != null && taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
+                    summary);
         }
-
-        Long parseJobId = taskData.getParseJob().getId();
-        Long fileRecordId = taskData.getFileRecord().getId();
-
-        try {
-            Query headerQuery = new Query(Criteria.where("parse_job_id").is(parseJobId));
-            List<ParsedDataHeader> headers = mongoTemplate.find(headerQuery, ParsedDataHeader.class);
-
-            if (headers == null || headers.isEmpty()) {
-                log.debug("解析阶段回滚：未找到需要删除的 ParsedDataHeader, fileRecordId={}, parseJobId={}",
-                        fileRecordId, parseJobId);
-            } else {
-                long totalItemDeleted = 0;
-                long headerDeleted = 0;
-
-                for (ParsedDataHeader header : headers) {
-                    deleteHeaderGridFsRefs(header);
-                    Long headerId = header.getId();
-                    if (headerId != null) {
-                        Query itemQuery = new Query(Criteria.where("header_id").is(headerId));
-                        long itemDeletedCount = mongoTemplate.remove(itemQuery, ParsedDataItem.class).getDeletedCount();
-                        totalItemDeleted += itemDeletedCount;
-                    }
-                    mongoTemplate.remove(header);
-                    headerDeleted++;
-                }
-
-                log.info("解析阶段回滚完成: fileRecordId={}, parseJobId={}, headersDeleted={}, itemsDeleted={}",
-                        fileRecordId, parseJobId, headerDeleted, totalItemDeleted);
-            }
-        } catch (Exception ex) {
-            log.warn("解析阶段回滚失败: fileRecordId={}, parseJobId={}, error={}",
-                    fileRecordId, parseJobId, ex.getMessage());
-        }
-
-        // 清理任务上下文中的解析结果，避免后续命令误用
-        taskData.setParsedDataHeader(null);
-        taskData.setParsedDataItems(null);
-        taskData.setRoomInfos(null);
-        taskData.setPlanningReviewForm(null);
-        taskData.setPlanningReviewRows(null);
-        taskData.setProjectPartySummaryForm(null);
-        taskData.setCapacityIndicatorInfo(null);
-    }
-
-    private void deleteHeaderGridFsRefs(ParsedDataHeader header) {
-        if (header == null) {
-            return;
-        }
-        safeDeleteGridFs(header.getLlmRawDataPath());
-        safeDeleteGridFs(header.getPreprocessGridfsId());
-        safeDeleteGridFs(header.getOcrRawDataPath());
-        safeDeleteGridFs(header.getMarkdownDataPath());
-    }
-
-    private void safeDeleteGridFs(String ref) {
-        if (!StringUtils.hasText(ref)) {
-            return;
-        }
-        try {
-            gridFSUtils.deleteById(ref.trim());
-        } catch (Exception ex) {
-            log.warn("解析回滚删除 GridFS 失败: ref={}, error={}", ref, ex.getMessage());
-        }
+        return summary;
     }
 
     private List<OCRPageResult> resolveOcrPages(TaskData taskData) {
@@ -305,7 +245,24 @@ public class ParseCommand extends AbstractCommand {
             return TaskException.ErrorCode.PARSE_DATA_INVALID;
         }
 
+        if (isNonRetryableParseBusinessFailure(exception, message)) {
+            return TaskException.ErrorCode.PARSE_DATA_INVALID;
+        }
+
         // 默认使用通用解析失败错误码
         return TaskException.ErrorCode.PARSE_FAILED;
+    }
+
+    private boolean isNonRetryableParseBusinessFailure(Exception exception, String message) {
+        if (exception instanceof IllegalStateException) {
+            return true;
+        }
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        return message.contains("未解析")
+                || message.contains("为空")
+                || message.contains("不可恢复")
+                || message.contains("缺少");
     }
 }

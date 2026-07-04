@@ -9,6 +9,8 @@ import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
@@ -18,11 +20,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 命令模式中角色：具体命令 - 数据校验命令
  * 数据校验命令 - 执行数据校验操作
- *
- * @author system
- * @date 2026/01/27
  */
 @Slf4j
 @Component
@@ -40,6 +38,9 @@ public class ValidateCommand extends AbstractCommand {
     @Resource
     private UnknownUsageRecordService unknownUsageRecordService;
 
+    @Resource
+    private ParseArtifactCleanupService parseArtifactCleanupService;
+
     public ValidateCommand() {
         super("数据校验", "VALIDATE");
     }
@@ -51,7 +52,6 @@ public class ValidateCommand extends AbstractCommand {
         parseJobUpdateService.updateValidateStarted(taskData.getParseJob());
 
         try {
-            // 动态链路仅在实测报告下组装 ValidateCommand，这里直接执行校验流程。
             Long fileRecordId = taskData.getFileRecord().getId();
             clearUnknownUsageRecordsForFile(fileRecordId);
 
@@ -66,7 +66,6 @@ public class ValidateCommand extends AbstractCommand {
             log.info("数据校验完成: fileId={}", taskData.getFileRecord().getId());
 
         } catch (Exception e) {
-            // 根据异常类型确定具体的错误码
             TaskException.ErrorCode errorCode = determineValidateErrorCode(e);
             log.error("数据校验失败: fileId={}, error={}",
                     taskData.getFileRecord().getId(), e.getMessage());
@@ -84,7 +83,6 @@ public class ValidateCommand extends AbstractCommand {
 
     @Override
     public boolean canSkip(TaskData taskData) {
-        // 动态组装后默认不会触发该分支，保留兜底以应对错误装配。
         if (taskData == null || taskData.getFileRecord() == null) {
             return true;
         }
@@ -92,16 +90,17 @@ public class ValidateCommand extends AbstractCommand {
     }
 
     /**
-     * 数据校验阶段回滚：
-     * 删除本文件在校验阶段产生的 UnknownUsageRecord（校验时遇到未知用途会写入）。
-     * SurveyReportInfo / RoomInfo 的校验更新若在同一事务内，已由 @Transactional 回滚。
+     * 校验阶段回滚：恢复 SurveyReportInfo 校验字段、RoomInfo 校验更新，并清理 UnknownUsageRecord。
      */
     @Override
-    public void rollback(TaskData taskData) throws TaskException {
-        if (taskData == null || taskData.getFileRecord() == null) {
-            return;
+    public ParseRollbackSummary rollback(TaskData taskData) throws TaskException {
+        var summary = parseArtifactCleanupService.rollbackValidate(taskData);
+        if (summary.hasFailures()) {
+            log.warn("校验阶段回滚存在失败项: fileRecordId={}, summary={}",
+                    taskData != null && taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
+                    summary);
         }
-        clearUnknownUsageRecordsForFile(taskData.getFileRecord().getId());
+        return summary;
     }
 
     private void clearUnknownUsageRecordsForFile(Long fileRecordId) {
@@ -118,27 +117,18 @@ public class ValidateCommand extends AbstractCommand {
         }
     }
 
-    /**
-     * 根据异常类型确定校验错误码
-     */
     private TaskException.ErrorCode determineValidateErrorCode(Exception exception) {
         String message = exception.getMessage();
-        if (message == null)
+        if (message == null) {
             message = "";
-
+        }
         String lowerMessage = message.toLowerCase();
-
-        // 检查是否是TaskException，如果是则保持原有错误码
         if (exception instanceof TaskException taskException) {
             return taskException.getErrorCode();
         }
-
-        // 校验操作涉及数据库查询，超时通常是数据库相关
         if (lowerMessage.contains("timeout") || lowerMessage.contains("time out")) {
             return TaskException.ErrorCode.VALIDATE_TIMEOUT;
         }
-
-        // 默认使用通用校验失败错误码
         return TaskException.ErrorCode.VALIDATE_FAILED;
     }
 }

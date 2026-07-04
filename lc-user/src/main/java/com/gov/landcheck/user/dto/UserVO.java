@@ -36,7 +36,7 @@ public class UserVO {
     @Schema(description = "部门ID（可选）", example = "1")
     private Long deptId;
 
-    @Schema(description = "用户类型：SUPER_ADMIN/ADMIN/DEVELOPER/USER（或历史 DEPT_USER）", example = "USER")
+    @Schema(description = "用户类型：SUPER_ADMIN/DEVELOPER/USER（或历史 DEPT_USER、ADMIN）", example = "USER")
     private String userType;
 
     @Schema(description = "是否启用（0否 1是）", example = "1")

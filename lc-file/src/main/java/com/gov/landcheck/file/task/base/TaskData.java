@@ -3,6 +3,7 @@ package com.gov.landcheck.file.task.base;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
 import com.gov.landcheck.core.bo.entity.ContractInfo;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
@@ -10,7 +11,6 @@ import com.gov.landcheck.core.bo.entity.ParsedDataHeader;
 import com.gov.landcheck.core.bo.entity.ParsedDataItem;
 import com.gov.landcheck.core.bo.entity.PlanningReviewForm;
 import com.gov.landcheck.core.bo.entity.PlanningReviewRow;
-import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
 import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
@@ -102,6 +102,71 @@ public class TaskData {
      * 本次解析管道是否已执行到回填命令（用于失败回滚时避免误删「上一轮已成功回填」的业务数据）
      */
     private boolean fillCommandEntered;
+
+    /**
+     * 回填前是否已存在合同记录（用于 Fill 失败时恢复快照或删除新建记录）
+     */
+    private boolean preFillContractExisted;
+
+    /**
+     * 回填前的合同快照（仅 Fill 阶段会更新的字段）
+     */
+    private ContractInfo preFillContractSnapshot;
+
+    /**
+     * 本次 Fill 是否新建了合同记录（用于回滚时删除，离线无快照时绝不误删已有合同）
+     */
+    private boolean fillCreatedNewContract;
+
+    /**
+     * 回填前是否已存在规划复核主表
+     */
+    private boolean preFillPlanningFormExisted;
+
+    /**
+     * 回填前的规划复核主表快照
+     */
+    private PlanningReviewForm preFillPlanningFormSnapshot;
+
+    /**
+     * 回填前的规划复核行快照
+     */
+    private List<PlanningReviewRow> preFillPlanningRowsSnapshot;
+
+    /**
+     * 本次 Fill 是否新建了规划复核主表
+     */
+    private boolean fillCreatedNewPlanningForm;
+
+    /**
+     * 回填前是否已存在容量指标记录
+     */
+    private boolean preFillCapacityExisted;
+
+    /**
+     * 回填前的容量指标快照
+     */
+    private CapacityIndicatorInfo preFillCapacitySnapshot;
+
+    /**
+     * 本次 Fill 是否新建了容量指标记录
+     */
+    private boolean fillCreatedNewCapacity;
+
+    /**
+     * 回填前是否已存在项目方汇总主表
+     */
+    private boolean preFillPartySummaryExisted;
+
+    /**
+     * 回填前的项目方汇总主表快照
+     */
+    private ProjectPartySurveySummaryForm preFillPartySummarySnapshot;
+
+    /**
+     * 本次 Fill 是否新建了项目方汇总主表
+     */
+    private boolean fillCreatedNewPartySummary;
 
     /**
      * 错误信息

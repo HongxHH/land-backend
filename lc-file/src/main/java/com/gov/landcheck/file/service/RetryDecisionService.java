@@ -67,8 +67,8 @@ public class RetryDecisionService {
             return RetryDecision.noRetry("错误类型不支持重试: " + errorType);
         }
 
-        // 计算下次重试延迟
-        long delayMs = retryConfig.calculateDelay(currentAttempts + 1);
+        // 计算下次重试延迟（至少 1 秒，避免与 fallback 清理并发竞态）
+        long delayMs = Math.max(1000L, retryConfig.calculateDelay(currentAttempts + 1));
 
         return RetryDecision.retry(delayMs, "错误类型: " + errorType + ", 延迟: " + delayMs + "ms");
     }
@@ -107,26 +107,28 @@ public class RetryDecisionService {
         if (exception instanceof TaskException taskException) {
             TaskException.ErrorCode errorCode = taskException.getErrorCode();
             switch (errorCode) {
-                // 预处理阶段错误
-                case PREPROCESS_FAILED:
+                // 预处理阶段错误（仅超时/资源类可重试）
                 case PREPROCESS_TIMEOUT:
                 case PREPROCESS_RESOURCE_ERROR:
                     return "timeout";
+                case PREPROCESS_FAILED:
+                    return "parse";
 
                 // OCR阶段错误
-                case OCR_FAILED:
                 case OCR_TIMEOUT:
                 case OCR_API_ERROR:
                     return "network";
+                case OCR_FAILED:
+                    return "unknown";
                 case OCR_INVALID_INPUT:
                     return "parse"; // 输入数据问题，不可重试
 
-                // 数据解析阶段错误
-                case PARSE_FAILED:
+                // 数据解析阶段错误（业务/数据问题不可重试，仅超时重试）
                 case PARSE_TIMEOUT:
                     return "timeout";
+                case PARSE_FAILED:
                 case PARSE_DATA_INVALID:
-                    return "parse"; // 数据格式问题，不可重试
+                    return "parse";
 
                 // 数据回填阶段错误
                 case FILL_FAILED:

@@ -60,6 +60,7 @@ import com.gov.landcheck.core.bo.entity.UnknownUsageRecord;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
+import com.gov.landcheck.core.audit.FileOperationAuthorization;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.FileType;
@@ -72,6 +73,7 @@ import com.gov.landcheck.file.dto.FileQueryResultDTO;
 import com.gov.landcheck.file.dto.SubmitParseResult;
 import com.gov.landcheck.file.service.FileService;
 import com.gov.landcheck.file.service.InvalidGridFsFileCleanup;
+import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
 import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.UploadRecordService;
@@ -110,8 +112,13 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
     @Lazy
     @Resource
     private FileParseSubmissionService fileParseSubmissionService;
+    @Lazy
+    @Resource
+    private DeferredParseSubmissionService deferredParseSubmissionService;
     @Resource
     private SurveyReportContractApprovalSyncService surveyReportContractApprovalSyncService;
+
+    private static final long DELETE_PARSE_CANCEL_WAIT_MS = 15_000L;
 
     private void publish(ProjectDataChangedEvent event) {
         if (event == null || !event.hasAnyId()) {
@@ -262,11 +269,19 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
 
     @Override
     public AjaxJson cancelParseTask(String fileId, String reason) {
+        return cancelParseTask(fileId, reason, true);
+    }
+
+    private AjaxJson cancelParseTask(String fileId, String reason, boolean scheduleAutoParseAfterCancel) {
         try {
             // 1. 检查文件是否存在
             FileRecord fileRecord = mongoTemplate.findById(fileId, FileRecord.class);
             if (fileRecord == null) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不存在");
+            }
+            if (!FileOperationAuthorization.canMutateFile(fileRecord)) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
+                        FileOperationAuthorization.denyReasonForFileMutate());
             }
 
             // 2. 获取最新的解析任务
@@ -287,6 +302,7 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
                     && !taskExecuteService.isTaskRunning(parseJob.getTaskId())) {
                 AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(),
                         fileRecord, Map.of("reason", reason != null ? reason : ""), null, null);
+                scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
                 return AjaxJson.getSuccess("解析任务已取消");
             }
 
@@ -304,15 +320,31 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
 
             // 6. 更新文件状态
             fileRecord.setFileState(FileStateEnum.WAITING_PARSE); // 重置为可解析状态
+            fileRecord.setAutoParseQueuedAt(null);
             mongoTemplate.save(fileRecord);
 
             AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(), fileRecord,
                     Map.of("reason", reason != null ? reason : "", "taskId", parseJob.getTaskId()), null, null);
+            scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
             return AjaxJson.getSuccess("解析任务取消请求已提交");
 
         } catch (Exception e) {
             log.error("取消解析任务失败: fileId={}, error={}", fileId, e.getMessage(), e);
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "取消解析任务失败: " + e.getMessage());
+        }
+    }
+
+    private void scheduleAutoParseIfNeeded(FileRecord fileRecord, boolean scheduleAutoParseAfterCancel) {
+        if (!scheduleAutoParseAfterCancel || fileRecord == null || fileRecord.getId() == null) {
+            return;
+        }
+        if (!FileContextType.isAutoParseContext(fileRecord.getFileContextType())) {
+            return;
+        }
+        try {
+            deferredParseSubmissionService.enqueueAfterUpload(fileRecord.getId());
+        } catch (Exception ex) {
+            log.warn("取消解析后重新入队自动解析失败: fileId={}, error={}", fileRecord.getId(), ex.getMessage());
         }
     }
 
@@ -322,58 +354,77 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
         try {
             log.info("开始删除文件: fileId={}", fileId);
 
-            // 1. 检查文件是否存在
             FileRecord fileRecord = mongoTemplate.findById(fileId, FileRecord.class);
             if (fileRecord == null) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不存在");
             }
 
-            Long fileRecordId = fileRecord.getId();
-            log.info("文件存在，开始清理相关数据: fileRecordId={}", fileRecordId);
-
-            // 2. 检查是否有正在进行或等待的解析任务
-            ParseJob parseJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileRecordId);
-            if (parseJob != null) {
-                // 检查任务是否正在进行或等待中
-                if (ParseJobStateEnum.PENDING.equals(parseJob.getJobStatus()) ||
-                        ParseJobStateEnum.RUNNING.equals(parseJob.getJobStatus())) {
-
-                    log.info("文件正在解析中，立即取消任务: taskId={}", parseJob.getTaskId());
-
-                    // 立即调用取消任务，不等待完成
-                    AjaxJson cancelResult = cancelParseTask(fileId, "文件删除操作-立即取消");
-                    if (cancelResult.getCode() != AjaxJson.CODE_SUCCESS) {
-                        log.warn("取消解析任务失败，但继续删除操作: fileId={}, cancelResult={}", fileId, cancelResult.getMsg());
-                    }
-
-                    // 返回提示信息，让用户稍后重试
-                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
-                            "文件正在解析，正在取消解析任务，请等待任务取消完成后（约20秒）再试删除操作");
-                }
+            if (!FileOperationAuthorization.canMutateFile(fileRecord)) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
+                        FileOperationAuthorization.denyReasonForFileMutate());
             }
 
-            // 3. 删除业务数据（根据文件类型）
-            deleteBusinessData(fileRecord);
+            if (FileStateEnum.isBlockedForDelete(fileRecord.getFileState())) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
+                        FileStateEnum.blockedDeleteReason(fileRecord.getFileState()));
+            }
 
-            // 4. 删除解析相关数据
-            deleteParseData(fileRecordId);
+            AjaxJson waitResult = awaitParseCancelBeforeDelete(fileId, fileRecord);
+            if (waitResult != null) {
+                return waitResult;
+            }
 
-            // 5. 删除GridFS文件
-            deleteGridFSFiles(fileRecord);
+            fileRecord = mongoTemplate.findById(fileId, FileRecord.class);
+            if (fileRecord == null) {
+                return AjaxJson.getSuccess("文件删除成功");
+            }
 
-            // 6. 删除文件记录本身
-            mongoTemplate.remove(fileRecord);
-
-            // 7. 删除上传记录（如存在）
-            uploadRecordService.deleteByFileId(fileRecordId);
-            log.info("文件记录删除成功: fileRecordId={}", fileRecordId);
-
-            return AjaxJson.getSuccess("文件删除成功");
+            return performFileDeletion(fileRecord);
 
         } catch (Exception e) {
             log.error("删除文件失败: fileId={}, error={}", fileId, e.getMessage(), e);
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "删除文件失败: " + e.getMessage());
         }
+    }
+
+    private AjaxJson awaitParseCancelBeforeDelete(String fileId, FileRecord fileRecord) {
+        if (!FileStateEnum.isParseActive(fileRecord.getFileState())) {
+            return null;
+        }
+        ParseJob parseJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileRecord.getId());
+        if (parseJob == null) {
+            return null;
+        }
+        if (!ParseJobStateEnum.PENDING.equals(parseJob.getJobStatus())
+                && !ParseJobStateEnum.RUNNING.equals(parseJob.getJobStatus())) {
+            return null;
+        }
+
+        log.info("文件正在解析中，取消并等待空闲后删除: taskId={}, fileId={}", parseJob.getTaskId(), fileId);
+        AjaxJson cancelResult = cancelParseTask(fileId, "文件删除操作-取消解析", false);
+        if (cancelResult.getCode() != AjaxJson.CODE_SUCCESS) {
+            log.warn("取消解析任务失败: fileId={}, msg={}", fileId, cancelResult.getMsg());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "取消解析任务失败: " + cancelResult.getMsg());
+        }
+
+        boolean idle = taskExecuteService.awaitTaskIdle(parseJob.getTaskId(), DELETE_PARSE_CANCEL_WAIT_MS);
+        if (!idle) {
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务仍在执行，请稍后再试删除");
+        }
+        return null;
+    }
+
+    private AjaxJson performFileDeletion(FileRecord fileRecord) {
+        Long fileRecordId = fileRecord.getId();
+        log.info("文件存在，开始清理相关数据: fileRecordId={}", fileRecordId);
+
+        deleteBusinessData(fileRecord);
+        deleteParseData(fileRecordId);
+        deleteGridFSFiles(fileRecord);
+        mongoTemplate.remove(fileRecord);
+        uploadRecordService.deleteByFileId(fileRecordId);
+        log.info("文件记录删除成功: fileRecordId={}", fileRecordId);
+        return AjaxJson.getSuccess("文件删除成功");
     }
 
     /**
@@ -581,8 +632,16 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
                     totalHeaderDeletedCount++;
                 }
 
-                // 删除OCRExecutionResult（通过parse_job_id关联）
+                // 删除OCRExecutionResult（通过parse_job_id关联，含 GridFS）
                 Query ocrQuery = new Query(Criteria.where("parse_job_id").is(parseJobId));
+                List<OCRExecutionResult> ocrResults = mongoTemplate.find(ocrQuery, OCRExecutionResult.class);
+                for (OCRExecutionResult ocrResult : ocrResults) {
+                    safeDeleteGridFsRef(ocrResult.getOcrResultJsonGridfsId(),
+                            "ocrExecutionResult.ocrResultJsonGridfsId",
+                            fileRecordId);
+                    safeDeleteGridFsRef(ocrResult.getMarkdownFileGridfsId(), "ocrExecutionResult.markdownFileGridfsId",
+                            fileRecordId);
+                }
                 long ocrDeletedCount = mongoTemplate.remove(ocrQuery, OCRExecutionResult.class).getDeletedCount();
                 if (ocrDeletedCount > 0) {
                     log.debug("删除OCR执行结果: parseJobId={}, deletedCount={}", parseJobId, ocrDeletedCount);
@@ -911,7 +970,12 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
                 projectId, fileId, cause != null ? cause.getClass().getSimpleName() : "null",
                 cause != null ? cause.getMessage() : "");
         try {
-            AjaxJson r = deleteFile(fileId);
+            FileRecord fileRecord = mongoTemplate.findById(fileId, FileRecord.class);
+            if (fileRecord == null) {
+                log.warn("文件上传回滚：记录已不存在 fileId={}", fileId);
+                return;
+            }
+            AjaxJson r = performFileDeletion(fileRecord);
             if (r == null || r.getCode() == null || r.getCode() != AjaxJson.CODE_SUCCESS) {
                 log.warn("文件上传回滚删除未成功: fileId={}, msg={}", fileId, r != null ? r.getMsg() : "null");
             }

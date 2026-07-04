@@ -6,6 +6,8 @@ import org.springframework.util.StringUtils;
 
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
@@ -34,6 +36,9 @@ public class PreprocessCommand extends AbstractCommand {
     @Resource
     private ParseJobUpdateService parseJobUpdateService;
 
+    @Resource
+    private ParseArtifactCleanupService parseArtifactCleanupService;
+
     public PreprocessCommand() {
         super("PDF预处理", "PREPROCESS");
     }
@@ -57,8 +62,7 @@ public class PreprocessCommand extends AbstractCommand {
             String preprocessGridfsId = pdfPreprocessor.preprocess(
                     fileRecord.getGridfsId(),
                     fileRecord.getOriginalName(),
-                    taskData
-            );
+                    taskData);
 
             // 更新任务数据
             taskData.setPreprocessGridfsId(preprocessGridfsId);
@@ -82,7 +86,8 @@ public class PreprocessCommand extends AbstractCommand {
                 log.debug("任务已取消，预处理已终止: fileId={}", fileRecord.getId());
                 throw e instanceof TaskException ? (TaskException) e
                         : new TaskException(TaskException.ErrorCode.PREPROCESS_FAILED, getStage(),
-                                fileRecord.getId(), taskData.getParseJob() != null ? taskData.getParseJob().getId() : null,
+                                fileRecord.getId(),
+                                taskData.getParseJob() != null ? taskData.getParseJob().getId() : null,
                                 "任务已取消，已终止Python预处理进程", e);
             }
             // 根据异常类型确定具体的错误码
@@ -96,46 +101,15 @@ public class PreprocessCommand extends AbstractCommand {
         }
     }
 
-    /**
-     * 预处理阶段回滚：
-     * - 删除本次预处理产生的预处理文件（如仍然存在）
-     * - 清空 FileRecord 与 TaskData 中的 preprocessGridfsId，避免残留无效引用
-     */
     @Override
-    public void rollback(TaskData taskData) throws TaskException {
-        if (taskData == null || taskData.getFileRecord() == null) {
-            return;
+    public ParseRollbackSummary rollback(TaskData taskData) throws TaskException {
+        var summary = parseArtifactCleanupService.rollbackPreprocess(taskData);
+        if (summary.hasFailures()) {
+            log.warn("预处理阶段回滚存在失败项: fileId={}, summary={}",
+                    taskData != null && taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
+                    summary);
         }
-
-        FileRecord fileRecord = taskData.getFileRecord();
-        String preprocessGridfsId = taskData.getPreprocessGridfsId();
-
-        // 如果 TaskData 中没有记录，则退回到 FileRecord 中的值
-        if (!StringUtils.hasText(preprocessGridfsId)) {
-            preprocessGridfsId = fileRecord.getPreprocessGridfsId();
-        }
-
-        if (!StringUtils.hasText(preprocessGridfsId)) {
-            log.debug("预处理阶段回滚：未发现需要删除的预处理文件, fileId={}", fileRecord.getId());
-            return;
-        }
-
-
-        // 复用 PdfPreReceiver 的删除逻辑，确保与预处理实现保持一致
-        pdfPreprocessor.deleteExistingPreprocessResult(preprocessGridfsId);
-        log.debug("预处理阶段回滚：已删除预处理文件, fileId={}, gridfsId={}",
-                fileRecord.getId(), preprocessGridfsId);
-
-
-        // 清理内存与数据库中的引用，避免后续逻辑依赖无效的 GridFS ID
-        fileRecord.setPreprocessGridfsId(null);
-        taskData.setPreprocessGridfsId(null);
-        try {
-            mongoTemplate.save(fileRecord);
-        } catch (Exception ex) {
-            log.warn("预处理阶段回滚：更新文件记录失败, fileId={}, error={}",
-                    fileRecord.getId(), ex.getMessage());
-        }
+        return summary;
     }
 
     /**
@@ -143,7 +117,8 @@ public class PreprocessCommand extends AbstractCommand {
      */
     private TaskException.ErrorCode determinePreprocessErrorCode(Exception exception) {
         String message = exception.getMessage();
-        if (message == null) message = "";
+        if (message == null)
+            message = "";
 
         String lowerMessage = message.toLowerCase();
 
@@ -158,7 +133,7 @@ public class PreprocessCommand extends AbstractCommand {
         }
 
         if (lowerMessage.contains("resource") || lowerMessage.contains("memory") ||
-            lowerMessage.contains("disk") || lowerMessage.contains("space")) {
+                lowerMessage.contains("disk") || lowerMessage.contains("space")) {
             return TaskException.ErrorCode.PREPROCESS_RESOURCE_ERROR;
         }
 

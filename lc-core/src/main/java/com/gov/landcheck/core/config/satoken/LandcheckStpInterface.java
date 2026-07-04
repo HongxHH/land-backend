@@ -30,9 +30,7 @@ public class LandcheckStpInterface implements StpInterface {
         if (userType == null || userType.isBlank()) {
             return Collections.emptyList();
         }
-        if (UserTypeConstants.LEGACY_DEPT_USER.equals(userType)) {
-            userType = UserTypeConstants.USER;
-        }
+        userType = UserTypeConstants.normalizeForSession(userType);
         return List.of(userType);
     }
 }

@@ -76,6 +76,9 @@ public class FileRecordVO {
     @Schema(description = "解析失败原因或提示")
     private String parseMessage;
 
+    @Schema(description = "已进入延迟自动解析队列的时间；仅 WAITING_PARSE 阶段有意义")
+    private LocalDateTime autoParseQueuedAt;
+
     @Schema(description = "期数")
     private Integer phase;
 

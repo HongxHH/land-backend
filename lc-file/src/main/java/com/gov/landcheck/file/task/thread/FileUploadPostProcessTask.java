@@ -3,17 +3,21 @@ package com.gov.landcheck.file.task.thread;
 import java.time.LocalDateTime;
 
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.UploadRecord;
-import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.FileType;
 import com.gov.landcheck.core.enums.UploadStatusEnum;
+import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.service.UploadRecordService;
 import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
 import com.gov.landcheck.file.utils.GridFSUtils;
 import com.gov.landcheck.file.utils.PdfProcessor;
+import com.mongodb.client.result.UpdateResult;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -72,7 +76,9 @@ public class FileUploadPostProcessTask implements Runnable {
         log.debug("文件上传后处理成功: fileId={}", fileId);
         try {
             FileRecord fileRecord = loadFileRecord();
-            if (fileRecord == null || !isAutoParseContext(fileRecord.getFileContextType())) {
+            if (fileRecord == null
+                    || fileRecord.getFileState() != FileStateEnum.WAITING_PARSE
+                    || !FileContextType.isAutoParseContext(fileRecord.getFileContextType())) {
                 return;
             }
             deferredParseSubmissionService.enqueueAfterUpload(fileRecord.getId());
@@ -113,13 +119,26 @@ public class FileUploadPostProcessTask implements Runnable {
             }
         }
 
-        if (isAutoParseContext(fileRecord.getFileContextType())) {
-            fileRecord.setFileState(FileStateEnum.WAITING_PARSE);
-        } else {
-            fileRecord.setFileState(FileStateEnum.UNPARSEABLE);
+        FileStateEnum targetState = FileContextType.isAutoParseContext(fileRecord.getFileContextType())
+                ? FileStateEnum.WAITING_PARSE
+                : FileStateEnum.UNPARSEABLE;
+
+        Update update = new Update()
+                .set("file_state", targetState)
+                .set("update_time", LocalDateTime.now());
+        if (fileRecord.getThumbGridfsId() != null) {
+            update.set("thumb_gridfs_id", fileRecord.getThumbGridfsId());
         }
 
-        mongoTemplate.save(fileRecord);
+        Query stateQuery = new Query(Criteria.where("_id").is(fileRecord.getId())
+                .and("file_state").is(FileStateEnum.WAITING_POST_PROCESS));
+        UpdateResult updateResult = mongoTemplate.updateFirst(stateQuery, update, FileRecord.class);
+        if (updateResult.getModifiedCount() == 0) {
+            log.info("后处理跳过：文件已删除或状态已变更 fileId={}", fileId);
+            return;
+        }
+
+        fileRecord.setFileState(targetState);
 
         UploadRecord uploadRecord = new UploadRecord();
         uploadRecord.setFileId(fileRecord.getId());
@@ -144,9 +163,18 @@ public class FileUploadPostProcessTask implements Runnable {
             if (fileRecord.getFileState() == FileStateEnum.UPLOAD_FAIL) {
                 return;
             }
+            Query stateQuery = new Query(Criteria.where("_id").is(fileRecord.getId())
+                    .and("file_state").is(FileStateEnum.WAITING_POST_PROCESS));
+            Update update = new Update()
+                    .set("file_state", FileStateEnum.UPLOAD_FAIL)
+                    .set("parse_message", "后处理失败: " + reason)
+                    .set("update_time", LocalDateTime.now());
+            UpdateResult updateResult = mongoTemplate.updateFirst(stateQuery, update, FileRecord.class);
+            if (updateResult.getModifiedCount() == 0) {
+                return;
+            }
             fileRecord.setFileState(FileStateEnum.UPLOAD_FAIL);
             fileRecord.setParseMessage("后处理失败: " + reason);
-            mongoTemplate.save(fileRecord);
 
             UploadRecord uploadRecord = new UploadRecord();
             uploadRecord.setFileId(fileRecord.getId());
@@ -168,14 +196,6 @@ public class FileUploadPostProcessTask implements Runnable {
         } catch (NumberFormatException ex) {
             return mongoTemplate.findById(fileId, FileRecord.class);
         }
-    }
-
-    private boolean isAutoParseContext(FileContextType contextType) {
-        return contextType == FileContextType.CONTRACT
-                || contextType == FileContextType.SURVEY_REPORT
-                || contextType == FileContextType.PLANNING_REVIEW
-                || contextType == FileContextType.CAPACITY_INDICATOR
-                || contextType == FileContextType.PROJECT_PARTY_SURVEY_SUMMARY;
     }
 
     private String resolveOperatorName() {

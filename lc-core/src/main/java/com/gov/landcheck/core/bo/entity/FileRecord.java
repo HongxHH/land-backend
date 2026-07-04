@@ -88,6 +88,10 @@ public class FileRecord extends MongoIdEntity {
     @Schema(description = "解析失败原因或提示")
     private String parseMessage;
 
+    @Field(name = "auto_parse_queued_at")
+    @Schema(description = "已进入延迟自动解析队列的时间；仅 WAITING_PARSE 阶段有意义")
+    private LocalDateTime autoParseQueuedAt;
+
     @Field(name = "phase")
     @Schema(description = "期数")
     private Integer phase;

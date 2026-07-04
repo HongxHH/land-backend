@@ -24,6 +24,7 @@ import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.service.SurveyReportContractApprovalSyncService;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
 import com.gov.landcheck.file.task.base.TaskData;
 
 import jakarta.annotation.PostConstruct;
@@ -82,6 +83,11 @@ public class DataFillReceiver {
         Query query = new Query(Criteria.where("file_record_id").is(taskData.getFileRecord().getId()));
         ContractInfo existingContractInfo = mongoTemplate.findOne(query, ContractInfo.class);
 
+        taskData.setPreFillContractExisted(existingContractInfo != null);
+        if (existingContractInfo != null) {
+            taskData.setPreFillContractSnapshot(ParseArtifactCleanupService.copyContractSnapshot(existingContractInfo));
+        }
+
         ContractInfo contractInfo;
         boolean isUpdate;
         if (existingContractInfo != null) {
@@ -92,6 +98,7 @@ public class DataFillReceiver {
             contractInfo.setProjectId(taskData.getFileRecord().getProjectId());
             contractInfo.setFileRecordId(taskData.getFileRecord().getId());
             isUpdate = false;
+            taskData.setFillCreatedNewContract(true);
         }
 
         // 2. 回填合同信息
@@ -228,11 +235,20 @@ public class DataFillReceiver {
         // 2. 查询并初始化规划复核表信息
         Query query = new Query(Criteria.where("file_record_id").is(taskData.getFileRecord().getId()));
         PlanningReviewForm existing = mongoTemplate.findOne(query, PlanningReviewForm.class);
+        taskData.setPreFillPlanningFormExisted(existing != null);
+        if (existing != null) {
+            taskData.setPreFillPlanningFormSnapshot(ParseArtifactCleanupService.copyPlanningFormSnapshot(existing));
+            List<PlanningReviewRow> existingRows = mongoTemplate.find(
+                    new Query(Criteria.where("file_record_id").is(fileRecordId)), PlanningReviewRow.class);
+            taskData.setPreFillPlanningRowsSnapshot(ParseArtifactCleanupService.copyPlanningRowSnapshots(existingRows));
+        }
+
         PlanningReviewForm target = existing != null ? existing : new PlanningReviewForm();
         if (existing == null) {
             target.setProjectId(projectId);
             target.setFileRecordId(fileRecordId);
             target.setIsParsed(0);
+            taskData.setFillCreatedNewPlanningForm(true);
         }
 
         PlanningReviewForm parsed = taskData.getPlanningReviewForm();
@@ -271,11 +287,17 @@ public class DataFillReceiver {
 
         Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
         CapacityIndicatorInfo existing = mongoTemplate.findOne(query, CapacityIndicatorInfo.class);
+        taskData.setPreFillCapacityExisted(existing != null);
+        if (existing != null) {
+            taskData.setPreFillCapacitySnapshot(ParseArtifactCleanupService.copyCapacitySnapshot(existing));
+        }
+
         CapacityIndicatorInfo target = existing != null ? existing : new CapacityIndicatorInfo();
         if (existing == null) {
             target.setProjectId(projectId);
             target.setFileRecordId(fileRecordId);
             target.setIsParsed(0);
+            taskData.setFillCreatedNewCapacity(true);
         }
 
         CapacityIndicatorInfo parsed = taskData.getCapacityIndicatorInfo();
@@ -353,11 +375,17 @@ public class DataFillReceiver {
 
         Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
         ProjectPartySurveySummaryForm existing = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
+        taskData.setPreFillPartySummaryExisted(existing != null);
+        if (existing != null) {
+            taskData.setPreFillPartySummarySnapshot(ParseArtifactCleanupService.copyPartySummarySnapshot(existing));
+        }
+
         ProjectPartySurveySummaryForm target = existing != null ? existing : new ProjectPartySurveySummaryForm();
         if (existing == null) {
             target.setProjectId(projectId);
             target.setFileRecordId(fileRecordId);
             target.setIsParsed(0);
+            taskData.setFillCreatedNewPartySummary(true);
         }
 
         target.setDeclaredTotals(parsed.getDeclaredTotals());

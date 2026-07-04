@@ -1,13 +1,11 @@
 package com.gov.landcheck.file.service;
 
-import java.util.List;
-
+import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
+import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.enums.FileStateEnum;
-import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
 import com.gov.landcheck.file.dto.TaskStatusDTO;
-import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 
 public interface ITaskExecuteService {
     /**
@@ -59,6 +57,15 @@ public interface ITaskExecuteService {
      * @return 是否正在运行
      */
     boolean isTaskRunning(String taskId);
+
+    /**
+     * 等待任务从线程池退出（完成、取消或失败），超时返回 false。
+     *
+     * @param taskId    任务 ID
+     * @param timeoutMs 最长等待毫秒数
+     * @return 任务已空闲返回 true，超时仍运行返回 false
+     */
+    boolean awaitTaskIdle(String taskId, long timeoutMs);
 
     /**
      * 获取当前任务状态信息

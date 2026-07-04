@@ -2,20 +2,19 @@ package com.gov.landcheck.file.task.processor.command;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.OCRExecutionResult;
-import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.file.dto.OCRPageResult;
 import com.gov.landcheck.file.dto.OCRProcessResult;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
@@ -47,6 +46,9 @@ public class OCRCommand extends AbstractCommand {
 
     @Resource
     private ParseJobUpdateService parseJobUpdateService;
+
+    @Resource
+    private ParseArtifactCleanupService parseArtifactCleanupService;
 
     public OCRCommand() {
         super("OCR识别", "OCR");
@@ -97,103 +99,54 @@ public class OCRCommand extends AbstractCommand {
         }
     }
 
-    /**
-     * OCR 阶段回滚：
-     * - 删除本次解析任务产生的 OCRExecutionResult 记录
-     * - 同时删除其关联的 JSON / Markdown GridFS 文件
-     * - 清理 TaskData 中的 OCR 结果缓存
-     */
     @Override
-    public void rollback(TaskData taskData) throws TaskException {
-        if (taskData == null || taskData.getFileRecord() == null || taskData.getParseJob() == null) {
-            return;
+    public ParseRollbackSummary rollback(TaskData taskData) throws TaskException {
+        var summary = parseArtifactCleanupService.rollbackOcr(taskData);
+        if (summary.hasFailures()) {
+            log.warn("OCR阶段回滚存在失败项: fileId={}, summary={}",
+                    taskData != null && taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
+                    summary);
         }
-
-        FileRecord fileRecord = taskData.getFileRecord();
-        ParseJob parseJob = taskData.getParseJob();
-
-        Long fileId = fileRecord.getId();
-        Long parseJobId = parseJob.getId();
-
-        try {
-            Query query = new Query(Criteria.where("parse_job_id").is(parseJobId));
-            List<OCRExecutionResult> results = mongoTemplate.find(query, OCRExecutionResult.class);
-
-            if (results == null || results.isEmpty()) {
-                log.debug("OCR阶段回滚：未找到需要删除的 OCRExecutionResult, fileId={}, parseJobId={}",
-                        fileId, parseJobId);
-            } else {
-                for (OCRExecutionResult executionResult : results) {
-                    // 1. 删除OCR结果JSON文件
-                    String jsonGridfsId = executionResult.getOcrResultJsonGridfsId();
-                    if (jsonGridfsId != null && !jsonGridfsId.trim().isEmpty()) {
-                        try {
-                            gridFSUtils.deleteById(jsonGridfsId);
-                            log.debug("OCR阶段回滚：已删除 OCR JSON 文件, fileId={}, gridfsId={}", fileId, jsonGridfsId);
-                        } catch (Exception ex) {
-                            log.warn("OCR阶段回滚：删除 OCR JSON 失败, fileId={}, gridfsId={}, error={}",
-                                    fileId, jsonGridfsId, ex.getMessage());
-                        }
-                    }
-
-                    // 2. 删除OCR结果Markdown文件
-                    String markdownGridfsId = executionResult.getMarkdownFileGridfsId();
-                    if (markdownGridfsId != null && !markdownGridfsId.trim().isEmpty()) {
-                        try {
-                            gridFSUtils.deleteById(markdownGridfsId);
-                            log.debug("OCR阶段回滚：已删除 OCR Markdown 文件, fileId={}, gridfsId={}",
-                                    fileId, markdownGridfsId);
-                        } catch (Exception ex) {
-                            log.warn("OCR阶段回滚：删除 OCR Markdown 失败, fileId={}, gridfsId={}, error={}",
-                                    fileId, markdownGridfsId, ex.getMessage());
-                        }
-                    }
-
-                    // 3. 删除OCRExecutionResult记录
-                    mongoTemplate.remove(executionResult);
-                    log.info("OCR阶段回滚：已删除 OCRExecutionResult, fileId={}, parseJobId={}, executionResultId={}",
-                            fileId, parseJobId, executionResult.getId());
-                }
-            }
-        } catch (Exception ex) {
-            log.warn("OCR阶段回滚失败: fileId={}, parseJobId={}, error={}", fileId, parseJobId, ex.getMessage());
-        }
-
-        // 清理任务上下文中的 OCR 结果，避免后续命令误用
-        taskData.setOcrProcessResult(null);
+        return summary;
     }
 
-    /**
-     * 保存OCR结果到数据库和GridFS
-     */
     private void saveOCRResult(OCRProcessResult ocrResult, Long fileId, Long parseJobId) throws TaskException {
+        String ocrResultJsonGridfsId = null;
+        String markdownFileGridfsId = null;
         try {
-            // 创建OCR执行结果记录
+            ocrResultJsonGridfsId = saveOCRResultToGridFS(ocrResult, fileId);
+            markdownFileGridfsId = saveOCRMarkdownToGridFS(ocrResult, fileId);
+
+            if (!StringUtils.hasText(ocrResultJsonGridfsId) && !StringUtils.hasText(markdownFileGridfsId)) {
+                throw new TaskException(
+                        TaskException.ErrorCode.IO_ERROR,
+                        getStage(),
+                        fileId,
+                        parseJobId,
+                        "OCR结果未能写入 GridFS（JSON 与 Markdown 均为空）");
+            }
+
             OCRExecutionResult executionResult = new OCRExecutionResult();
             executionResult.setFileRecordId(fileId);
             executionResult.setParseJobId(parseJobId);
-
-            // 1. 保存OCR结果JSON到GridFS
-            String ocrResultJsonGridfsId = saveOCRResultToGridFS(ocrResult, fileId);
             executionResult.setOcrResultJsonGridfsId(ocrResultJsonGridfsId);
-
-            // 2. 保存Markdown内容到GridFS
-            String markdownFileGridfsId = saveOCRMarkdownToGridFS(ocrResult, fileId);
             executionResult.setMarkdownFileGridfsId(markdownFileGridfsId);
-
-            // 设置统计信息
             executionResult.setPageCount(ocrResult.getPageResults() != null ? ocrResult.getPageResults().size() : 0);
             executionResult.setProcessingTimeMs(ocrResult.getProcessingTimeMs());
             executionResult.setExecutionTime(LocalDateTime.now());
-
-            // 保存到数据库
             executionResult.preSave();
             mongoTemplate.save(executionResult);
 
             log.info("OCR结果保存完成: fileId={}, ocrResultGridfsId={}, markdownGridfsId={}",
                     fileId, ocrResultJsonGridfsId, markdownFileGridfsId);
 
+        } catch (TaskException e) {
+            safeDeleteQuiet(ocrResultJsonGridfsId);
+            safeDeleteQuiet(markdownFileGridfsId);
+            throw e;
         } catch (Exception e) {
+            safeDeleteQuiet(ocrResultJsonGridfsId);
+            safeDeleteQuiet(markdownFileGridfsId);
             throw new TaskException(
                     TaskException.ErrorCode.IO_ERROR,
                     getStage(),
@@ -204,29 +157,28 @@ public class OCRCommand extends AbstractCommand {
         }
     }
 
+    private void safeDeleteQuiet(String gridfsId) {
+        if (!StringUtils.hasText(gridfsId)) {
+            return;
+        }
+        try {
+            gridFSUtils.deleteById(gridfsId.trim());
+        } catch (Exception ex) {
+            log.warn("OCR保存失败补偿删除 GridFS 失败: gridfsId={}, error={}", gridfsId, ex.getMessage());
+        }
+    }
+
     /**
      * 保存OCR结果JSON到GridFS
      */
-    private String saveOCRResultToGridFS(OCRProcessResult ocrResult, Long fileId) {
-        try {
-            // 序列化完整版OCR结果为JSON
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            String jsonContent = mapper.writeValueAsString(ocrResult);
-
-            // 生成文件名
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            String filename = String.format("ocr_result_%d_%s.json", fileId, timestamp);
-
-            // 上传到GridFS
-            String gridfsId = gridFSUtils.uploadString(jsonContent, filename, "application/json");
-
-            log.debug("OCR结果JSON已保存到GridFS: fileId={}, gridfsId={}", fileId, gridfsId);
-            return gridfsId;
-
-        } catch (Exception e) {
-            log.warn("保存OCR结果到GridFS失败: fileId={}, error={}", fileId, e.getMessage());
-            return null;
-        }
+    private String saveOCRResultToGridFS(OCRProcessResult ocrResult, Long fileId) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        String jsonContent = mapper.writeValueAsString(ocrResult);
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String filename = String.format("ocr_result_%d_%s.json", fileId, timestamp);
+        String gridfsId = gridFSUtils.uploadString(jsonContent, filename, "application/json");
+        log.debug("OCR结果JSON已保存到GridFS: fileId={}, gridfsId={}", fileId, gridfsId);
+        return gridfsId;
     }
 
     /**
@@ -310,17 +262,4 @@ public class OCRCommand extends AbstractCommand {
         // 默认使用通用OCR失败错误码
         return TaskException.ErrorCode.OCR_FAILED;
     }
-
-    /**
-     * 更新解析任务状态
-     */
-    public void updateParseJobStatus(ParseJob parseJob) {
-        try {
-            mongoTemplate.save(parseJob);
-        } catch (Exception e) {
-            log.error("更新解析任务状态失败: parseJobId={}, error={}",
-                    parseJob.getId(), e.getMessage());
-        }
-    }
-
 }

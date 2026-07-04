@@ -46,11 +46,15 @@ public interface SysUserService {
     AjaxJson updateUser(Long userId, UserDTO userDTO);
 
     /**
-     * 由超级管理员或管理员更新目标用户的 {@code user_type}（不修改密码及其他字段）。
+     * 由超级管理员更新目标用户的 {@code user_type}（不修改密码及其他字段）。
      */
     AjaxJson updateUserType(Long userId, String newUserType);
 
     /**
+     * 超级管理员重置用户密码。
+     */
+    AjaxJson updateUserPassword(Long userId, String newPassword);**
+
      * 根据ID删除用户
      *
      * @param userId 用户ID

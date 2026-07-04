@@ -318,6 +318,7 @@ public class ParseFileTask implements Task {
 
             case CANCELLED -> {
                 taskData.getFileRecord().setFileState(FileStateEnum.WAITING_PARSE);
+                taskData.getFileRecord().setAutoParseQueuedAt(null);
                 taskData.getFileRecord().setPreprocessGridfsId(null);
                 taskData.getFileRecord().setParseJobId(taskData.getParseJob().getId());
                 parseJobUpdateService.updateJobCancelled(taskData.getParseJob());
@@ -330,7 +331,7 @@ public class ParseFileTask implements Task {
 
     @Override
     public TaskResultSummary buildResultSummary(Throwable throwable) {
-        if (cancelled || taskData == null || taskData.getFileRecord() == null) {
+        if (cancelled || retryTriggered || taskData == null || taskData.getFileRecord() == null) {
             return TaskResultSummary.none();
         }
         Long fileId = taskData.getFileRecord().getId();

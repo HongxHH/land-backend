@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.config.FileProcessingConfig;
 import com.gov.landcheck.file.processing.ProcessingConcurrencyGate;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.Command;
 import com.gov.landcheck.file.task.base.Pipeline;
 import com.gov.landcheck.file.task.base.PipelineBuilder;
@@ -46,6 +48,9 @@ public class ParseFileExecutor {
 
     @Autowired
     private ValidateCommand validateCommand;
+
+    @Autowired
+    private ParseArtifactCleanupService parseArtifactCleanupService;
 
     private final ProcessingConcurrencyGate parsePipelineGate;
 
@@ -88,7 +93,16 @@ public class ParseFileExecutor {
         }
         taskData.getParseJob().setFileContextType(taskData.getFileRecord().getFileContextType());
         Pipeline pipeline = buildPipeline(taskData);
-        pipeline.rollbackAll(taskData);
+        ParseRollbackSummary summary = pipeline.rollbackAll(taskData);
+        parseArtifactCleanupService.clearIntermediateReferences(
+                taskData.getParseJob(), taskData.getFileRecord(), taskData, summary);
+        if (summary.hasFailures()) {
+            log.warn("解析管道回滚存在失败项: fileRecordId={}, parseJobId={}, summary={}",
+                    taskData.getFileRecord().getId(), taskData.getParseJob().getId(), summary);
+        } else {
+            log.info("解析管道回滚完成: fileRecordId={}, parseJobId={}, summary={}",
+                    taskData.getFileRecord().getId(), taskData.getParseJob().getId(), summary);
+        }
     }
 
     private Pipeline buildPipeline(TaskData taskData) {

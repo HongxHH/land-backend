@@ -29,4 +29,8 @@ public class Project extends MongoIdEntity {
     @Schema(description = "项目时间（业务日期，ISO 自然日）", example = "2025-11-15")
     private String projectTime;
 
+    @Field(name = "created_by")
+    @Schema(description = "创建人 sys_user.id")
+    private Long createdBy;
+
 }

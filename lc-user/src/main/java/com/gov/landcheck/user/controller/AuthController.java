@@ -44,7 +44,7 @@ public class AuthController {
         return sysUserService.register(request);
     }
 
-    @Operation(summary = "用户类型字典", description = "四类权限编码与中文名，供管理端下拉使用")
+    @Operation(summary = "用户类型字典", description = "三类权限编码与中文名，供管理端下拉使用")
     @GetMapping("/user-types")
     public AjaxJson userTypes() {
         return AjaxJson.getSuccessData(UserTypeConstants.options());
@@ -67,11 +67,7 @@ public class AuthController {
 
         StpUtil.login(user.getId());
         StpUtil.getSession().set("username", user.getUsername());
-        String sessionUserType = user.getUserType();
-        if (UserTypeConstants.LEGACY_DEPT_USER.equals(sessionUserType)) {
-            sessionUserType = UserTypeConstants.USER;
-        }
-        StpUtil.getSession().set("userType", sessionUserType);
+        StpUtil.getSession().set("userType", UserTypeConstants.normalizeForSession(user.getUserType()));
 
         sysUserService.updateLastLogin(user.getId());
 

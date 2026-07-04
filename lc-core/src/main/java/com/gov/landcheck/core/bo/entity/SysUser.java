@@ -50,7 +50,7 @@ public class SysUser extends MongoIdEntity {
     private Long deptId;
 
     @Field(name = "user_type")
-    @Schema(description = "用户类型：SUPER_ADMIN=超级管理员，ADMIN=管理员，DEVELOPER=开发人员，USER=普通用户", example = "USER")
+    @Schema(description = "用户类型：SUPER_ADMIN=超级管理员，DEVELOPER=开发人员，USER=普通用户", example = "USER")
     private String userType;
 
     @Field(name = "is_active")

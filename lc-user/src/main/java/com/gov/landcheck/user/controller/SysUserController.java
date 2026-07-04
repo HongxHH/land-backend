@@ -17,6 +17,7 @@ import com.gov.landcheck.core.bo.entity.SysUser;
 import com.gov.landcheck.core.common.UserTypeConstants;
 import com.gov.landcheck.user.dto.UserAdminLookupVO;
 import com.gov.landcheck.user.dto.UserDTO;
+import com.gov.landcheck.user.dto.UserPasswordUpdateDTO;
 import com.gov.landcheck.user.dto.UserQueryDTO;
 import com.gov.landcheck.user.dto.UserTypeUpdateDTO;
 import com.gov.landcheck.user.dto.UserVO;
@@ -39,8 +40,7 @@ import jakarta.validation.Valid;
 @Tag(name = "用户管理")
 @RestController
 @RequestMapping("/user")
-@SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.ADMIN,
-        UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
+@SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
 public class SysUserController {
 
     @Resource
@@ -59,11 +59,19 @@ public class SysUserController {
         return sysUserService.updateUser(userId, userDTO);
     }
 
-    @Operation(summary = "更新用户权限类型", description = "仅超级管理员、管理员可调用；管理员不可将用户设为超级管理员，也不可修改已是超级管理员的用户。")
+    @Operation(summary = "更新用户权限类型", description = "仅超级管理员可调用。")
     @PutMapping("/user-type/{userId}")
     public AjaxJson updateUserType(@Parameter(description = "用户ID") @PathVariable Long userId,
             @Valid @RequestBody UserTypeUpdateDTO body) {
         return sysUserService.updateUserType(userId, body.getUserType());
+    }
+
+    @Operation(summary = "超级管理员重置用户密码", description = "仅超级管理员可调用。")
+    @PutMapping("/password/{userId}")
+    @SaCheckRole(UserTypeConstants.SUPER_ADMIN)
+    public AjaxJson updateUserPassword(@Parameter(description = "用户ID") @PathVariable Long userId,
+            @Valid @RequestBody UserPasswordUpdateDTO body) {
+        return sysUserService.updateUserPassword(userId, body.getPassword());
     }
 
     @Operation(summary = "删除用户")
@@ -97,7 +105,7 @@ public class SysUserController {
         }
     }
 
-    @Operation(summary = "根据用户名获取用户信息", description = "仅管理员；返回脱敏后的简要信息")
+    @Operation(summary = "根据用户名获取用户信息", description = "仅超级管理员或开发人员；返回脱敏后的简要信息")
     @GetMapping("/get-by-username/{username}")
     public AjaxJson getUserByUsername(@Parameter(description = "用户名") @PathVariable String username) {
         Optional<SysUser> userOpt = sysUserService.getUserByUsername(username);
