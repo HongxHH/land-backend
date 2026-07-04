@@ -15,8 +15,8 @@ import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.dto.SubmitParseResult;
+import com.gov.landcheck.file.service.FileService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
-import com.gov.landcheck.file.service.InvalidGridFsFileCleanup;
 import com.gov.landcheck.file.utils.GridFSUtils;
 import com.mongodb.client.result.UpdateResult;
 
@@ -41,7 +41,7 @@ public class FileParseSubmissionService {
     private ITaskExecuteService taskExecuteService;
     @Lazy
     @Resource
-    private InvalidGridFsFileCleanup invalidGridFsFileCleanup;
+    private FileService fileService;
 
     @Resource
     private ParseArtifactCleanupService parseArtifactCleanupService;
@@ -104,7 +104,7 @@ public class FileParseSubmissionService {
             }
             if (!gridFSUtils.exists(fileRecord.getGridfsId())) {
                 log.debug("GridFS文件不存在，开始清理无效文件记录: fileId={}, gridfsId={}", fileRecordId, fileRecord.getGridfsId());
-                invalidGridFsFileCleanup.cleanupFileRecordWhenGridFsMissing(fileRecord);
+                fileService.cleanupFileRecordWhenGridFsMissing(fileRecord);
                 log.debug("无效文件记录清理完成: fileId={}, gridfsId={}", fileRecordId, fileRecord.getGridfsId());
                 return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "该文件已不存在，请重新上传后再试");
             }
@@ -139,7 +139,7 @@ public class FileParseSubmissionService {
                 revertPendingParseReservation(fileRecordId, rollbackState);
             }
             return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE),
-                    "解析文件失败: " + e.getMessage());
+                    "解析文件失败");
         }
     }
 

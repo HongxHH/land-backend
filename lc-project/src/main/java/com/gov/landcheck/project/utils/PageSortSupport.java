@@ -1,14 +1,15 @@
 package com.gov.landcheck.project.utils;
 
-import org.springframework.data.domain.Sort;
-import org.springframework.util.StringUtils;
+import java.util.Set;
 
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Sort;
+
+import com.gov.landcheck.core.config.query.MongoSortFields;
+import com.gov.landcheck.core.config.query.SafePageSort;
 
 /**
- * 分页与排序字段安全解析（与 lc-file 模块 {@code OtherDataServiceImpl} 中逻辑保持一致）。
+ * 分页与排序字段安全解析（委托 lc-core {@link SafePageSort}）。
  */
-@Slf4j
 public final class PageSortSupport {
 
     private PageSortSupport() {
@@ -23,15 +24,11 @@ public final class PageSortSupport {
     }
 
     public static Sort resolveSort(String sortDirection, String sortField, String defaultField) {
-        Sort.Direction direction = Sort.Direction.DESC;
-        if (StringUtils.hasText(sortDirection)) {
-            try {
-                direction = Sort.Direction.fromString(sortDirection.trim());
-            } catch (IllegalArgumentException ex) {
-                log.debug("非法排序方向 [{}]，回退为 DESC", sortDirection);
-            }
-        }
-        String field = StringUtils.hasText(sortField) ? sortField.trim() : defaultField;
-        return Sort.by(direction, field);
+        return SafePageSort.resolve(sortDirection, sortField, defaultField, MongoSortFields.PROJECT);
+    }
+
+    public static Sort resolveSort(String sortDirection, String sortField, String defaultField,
+            Set<String> allowedFields) {
+        return SafePageSort.resolve(sortDirection, sortField, defaultField, allowedFields);
     }
 }

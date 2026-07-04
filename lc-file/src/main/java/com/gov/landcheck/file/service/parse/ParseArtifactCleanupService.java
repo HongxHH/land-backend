@@ -26,7 +26,6 @@ import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
-import com.gov.landcheck.core.config.global.ParseJobRecoveryContributor;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.core.service.UnknownUsageRecordService;
@@ -42,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-public class ParseArtifactCleanupService implements ParseJobRecoveryContributor {
+public class ParseArtifactCleanupService {
 
     @Resource
     private MongoTemplate mongoTemplate;
@@ -59,7 +58,6 @@ public class ParseArtifactCleanupService implements ParseJobRecoveryContributor 
     @Autowired(required = false)
     private ApplicationEventPublisher applicationEventPublisher;
 
-    @Override
     public void cleanupBeforeMarkFailed(List<ParseJob> hangingJobs) {
         if (hangingJobs == null || hangingJobs.isEmpty()) {
             return;

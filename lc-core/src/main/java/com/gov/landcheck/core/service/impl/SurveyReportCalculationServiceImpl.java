@@ -9,7 +9,8 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.bo.entity.UsageConfig;
@@ -38,6 +39,9 @@ public class SurveyReportCalculationServiceImpl implements SurveyReportCalculati
 
     @Autowired
     private UnknownUsageRecordService unknownUsageRecordService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Override
     public void calculateUsageSums(SurveyReportInfo surveyReportInfo, List<RoomInfo> roomInfos) {
@@ -175,7 +179,11 @@ public class SurveyReportCalculationServiceImpl implements SurveyReportCalculati
         surveyReportInfo.setTotalNonBuildableArea(totalNonBuildableArea.setScale(4, RoundingMode.HALF_UP));
         surveyReportInfo.setPendingConfirmArea(pendingConfirmArea.setScale(4, RoundingMode.HALF_UP));
         surveyReportInfo.setHasUnknownUsage(unknownUsages.isEmpty() ? 0 : 1);
-        surveyReportInfo.setUnknownUsages(JSON.toJSONString(unknownUsages));
+        try {
+            surveyReportInfo.setUnknownUsages(objectMapper.writeValueAsString(unknownUsages));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("序列化未知用途失败", e);
+        }
         surveyReportInfo.setUnknownUsageCount(unknownUsages.size());
 
         // 目前按照：计算实测报告总建筑面积 = 户室面积对照表的建筑面积总和

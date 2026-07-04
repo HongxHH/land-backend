@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -26,8 +28,7 @@ import com.gov.landcheck.core.audit.TargetType;
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
 import com.gov.landcheck.core.bo.entity.FileRecord;
-import com.gov.landcheck.core.config.cache.config.CacheProperties;
-import com.gov.landcheck.core.config.cache.model.CacheLoadOptions;
+import com.gov.landcheck.core.config.cache.model.CacheLoadOptionsFactory;
 import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
@@ -41,6 +42,7 @@ import com.gov.landcheck.project.utils.PageSortSupport;
 import com.gov.landcheck.project.vo.CapacityIndicatorFormVO;
 
 @Service
+@Slf4j
 public class CapacityIndicatorServiceImpl implements CapacityIndicatorService {
 
     private static final long DOUBLE_DELETE_DELAY_MS = 500L;
@@ -55,7 +57,7 @@ public class CapacityIndicatorServiceImpl implements CapacityIndicatorService {
     private CacheInvalidationService cacheInvalidationService;
 
     @Autowired
-    private CacheProperties cacheProperties;
+    private CacheLoadOptionsFactory cacheLoadOptionsFactory;
 
     @Autowired
     private ProjectCacheKeys projectCacheKeys;
@@ -65,7 +67,7 @@ public class CapacityIndicatorServiceImpl implements CapacityIndicatorService {
         CapacityIndicatorFormQueryDTO normalized = queryDTO == null ? new CapacityIndicatorFormQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryCapacityIndicatorForms(normalized);
         CapacityIndicatorFormQueryResultDTO result = cacheOpsService.getOrLoad(
-                key, queryOptions(), () -> queryCapacityIndicatorFormsInternal(normalized));
+                key, cacheLoadOptionsFactory.queryOptions(), () -> queryCapacityIndicatorFormsInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
 
@@ -86,7 +88,8 @@ public class CapacityIndicatorServiceImpl implements CapacityIndicatorService {
             evictAfterWrite(directKeys);
             return AjaxJson.getSuccess("容量指标核查表更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("更新容量指标核查表失败: " + e.getMessage());
+            log.error("更新容量指标核查表失败", e);
+            return AjaxJson.getError("更新容量指标核查表失败");
         }
     }
 
@@ -154,15 +157,5 @@ public class CapacityIndicatorServiceImpl implements CapacityIndicatorService {
     private void evictAfterWrite(Set<String> directKeys) {
         cacheInvalidationService.evictTwice(directKeys, DOUBLE_DELETE_DELAY_MS);
         cacheInvalidationService.evictByPatternTwice(Set.of(projectCacheKeys.queryPattern()), DOUBLE_DELETE_DELAY_MS);
-    }
-
-    private CacheLoadOptions queryOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getQuery())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
     }
 }

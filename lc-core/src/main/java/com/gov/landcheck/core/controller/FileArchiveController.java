@@ -17,6 +17,9 @@ import com.gov.landcheck.core.bo.entity.FileArchive;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.service.IFileArchiveService;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaMode;
+import com.gov.landcheck.core.common.UserTypeConstants;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -46,12 +49,13 @@ public class FileArchiveController {
             List<FileArchive> list = fileArchiveService.listByProjectId(projectId);
             return AjaxJson.getSuccess("获取归档夹列表成功").setData(list);
         } catch (Exception e) {
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取归档夹列表失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取归档夹列表失败");
         }
     }
 
     @PostMapping("/{projectId}/archives")
     @Operation(summary = "在项目下新建归档夹", description = "新建用户自定义归档夹（如现场图片、红线文件），kind 为空，与系统默认目录区分")
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson createArchive(
             @Valid @RequestBody CreateArchiveDTO dto) {
         return fileArchiveService.createArchive(dto);
@@ -59,6 +63,7 @@ public class FileArchiveController {
 
     @DeleteMapping("/delete-archives/{projectId}/{archiveId}")
     @Operation(summary = "删除归档夹", description = "仅支持删除用户自定义归档夹；若该归档夹下仍有文件，需先删除或移出所有文件后再删除")
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson deleteArchive(
             @Parameter(description = "项目ID") @PathVariable @NotNull(message = "项目ID不能为空") Long projectId,
             @Parameter(description = "归档夹ID") @PathVariable @NotNull(message = "归档夹ID不能为空") Long archiveId) {
@@ -67,7 +72,8 @@ public class FileArchiveController {
 
     @PostMapping("/update-archive")
     @Operation(summary = "更新归档夹", description = "仅可修改归档夹名称和排序值，其他字段不可修改")
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson updateArchive(@RequestBody @Valid UpdateArchiveDTO dto) {
-        return fileArchiveService.updateArchive( dto);
+        return fileArchiveService.updateArchive(dto);
     }
 }

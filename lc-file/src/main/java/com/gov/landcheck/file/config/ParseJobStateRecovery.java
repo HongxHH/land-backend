@@ -1,4 +1,4 @@
-package com.gov.landcheck.core.config.global;
+package com.gov.landcheck.file.config;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,15 +16,12 @@ import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
+import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 解析任务状态恢复器
- * 用于在应用启动时清理因程序异常退出而悬挂的解析任务状态
- *
- * @author system
- * @date 2026/01/23
+ * 解析任务状态恢复器：应用启动时清理悬挂的解析任务状态。
  */
 @Slf4j
 @Component
@@ -34,36 +31,28 @@ public class ParseJobStateRecovery implements ApplicationRunner {
     private MongoTemplate mongoTemplate;
 
     @Autowired(required = false)
-    private ParseJobRecoveryContributor parseJobRecoveryContributor;
+    private ParseArtifactCleanupService parseArtifactCleanupService;
 
     @Override
     public void run(ApplicationArguments args) {
         try {
-            // 1. 恢复悬挂的 ParseJob 状态
             recoverHangingParseJobs();
-
-            // 2. 恢复悬挂的 FileRecord 状态
             recoverHangingFileRecords();
-
             log.info("解析任务状态恢复完成");
         } catch (Exception e) {
             log.error("解析任务状态恢复失败: {}", e.getMessage(), e);
         }
     }
 
-    /**
-     * 恢复悬挂的解析任务
-     * 将状态为 PENDING 或 RUNNING 的任务标记为 FAILED
-     */
     private void recoverHangingParseJobs() {
         Query query = new Query(Criteria.where("job_status").in(
                 ParseJobStateEnum.PENDING.getCode(),
                 ParseJobStateEnum.RUNNING.getCode()));
         List<ParseJob> hangingJobs = mongoTemplate.find(query, ParseJob.class);
 
-        if (parseJobRecoveryContributor != null && !hangingJobs.isEmpty()) {
+        if (parseArtifactCleanupService != null && !hangingJobs.isEmpty()) {
             try {
-                parseJobRecoveryContributor.cleanupBeforeMarkFailed(hangingJobs);
+                parseArtifactCleanupService.cleanupBeforeMarkFailed(hangingJobs);
             } catch (Exception ex) {
                 log.error("悬挂解析任务中间产物清理失败，将继续更新状态: {}", ex.getMessage(), ex);
             }
@@ -78,9 +67,6 @@ public class ParseJobStateRecovery implements ApplicationRunner {
         log.debug("已恢复 {} 个悬挂的解析任务状态", updatedCount);
     }
 
-    /**
-     * 恢复悬挂的文件记录状态：PENDING 回滚为 WAITING_PARSE，PARSING 标记为 PARSE_FAIL。
-     */
     private void recoverHangingFileRecords() {
         Query pendingQuery = new Query(Criteria.where("file_state").is(FileStateEnum.PENDING.getCode()));
         Update pendingUpdate = new Update()

@@ -1,12 +1,11 @@
 package com.gov.landcheck.core.bo.R;
 
 import com.gov.landcheck.core.common.MessageConstant;
-import com.gov.landcheck.core.utils.SoMap;
+import com.gov.landcheck.core.utils.RequestPageParams;
 
 import java.io.Serializable;
 import java.util.LinkedHashMap;
 import java.util.Map;
-
 
 /**
  * ajax请求返回Json格式数据的封装 <br>
@@ -19,7 +18,10 @@ import java.util.Map;
  * startIndex=起始索引 <br>
  * dataCount=数据总数 <br>
  * pageCount=分页总数 <br>
- * <p> 返回范例：</p>
+ * <p>
+ * 返回范例：
+ * </p>
+ * 
  * <pre>
  * {
  * "code": 200,    // 成功时=200, 失败时=500  msg=失败原因
@@ -30,17 +32,15 @@ import java.util.Map;
  */
 public class AjaxJson extends LinkedHashMap<String, Object> implements Serializable {
 
-    private static final long serialVersionUID = 1L;    // 序列化版本号
+    private static final long serialVersionUID = 1L; // 序列化版本号
 
-    public static final int CODE_SUCCESS = 200;            // 成功状态码
-    public static final int CODE_ERROR = 201;            // 错误状态码
-    public static final int CODE_WARNING = 501;            // 警告状态码
-    public static final int CODE_NOT_JUR = 403;            // 无权限状态码
-    public static final int CODE_NOT_LOGIN = 401;        // 未登录状态码
+    public static final int CODE_SUCCESS = 200; // 成功状态码
+    public static final int CODE_ERROR = 201; // 错误状态码
+    public static final int CODE_WARNING = 501; // 警告状态码
+    public static final int CODE_NOT_JUR = 403; // 无权限状态码
+    public static final int CODE_NOT_LOGIN = 401; // 未登录状态码
 
-
-
-    // ============================  写值取值  ==================================
+    // ============================ 写值取值 ==================================
 
     /**
      * 给code赋值，连缀风格
@@ -107,9 +107,8 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
                 this.initPageInfo();
             }
             // 或者：是JavaWeb环境
-            else if (SoMap.isJavaWeb()) {
-                SoMap so = SoMap.getRequestSoMap();
-                this.setPageNoAndSize(so.getKeyPageNo(), so.getKeyPageSize());
+            else if (RequestPageParams.isWebRequest()) {
+                this.setPageNoAndSize(RequestPageParams.getPageNo(), RequestPageParams.getPageSize());
                 this.initPageInfo();
             }
         }
@@ -138,7 +137,6 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
         return this;
     }
 
-
     /**
      * 写入一个值 自定义key, 连缀风格
      */
@@ -157,8 +155,7 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
         return this;
     }
 
-
-    // ============================  构建  ==================================
+    // ============================ 构建 ==================================
 
     public AjaxJson(int code, String msg, Object data, Long dataCount) {
         this.setCode(code);
@@ -173,7 +170,7 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
      * 返回成功
      */
     public static AjaxJson getSuccess() {
-        return new AjaxJson(CODE_SUCCESS,  MessageConstant.SUCCESS, null, null);
+        return new AjaxJson(CODE_SUCCESS, MessageConstant.SUCCESS, null, null);
     }
 
     public static AjaxJson getSuccess(String msg) {
@@ -187,7 +184,6 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
     public static AjaxJson getSuccessData(Object data) {
         return new AjaxJson(CODE_SUCCESS, MessageConstant.SUCCESS, data, null);
     }
-
 
     /**
      * 返回失败
@@ -215,9 +211,8 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
      * 返回未登录
      */
     public static AjaxJson getNotLogin() {
-        return new AjaxJson(CODE_NOT_LOGIN, MessageConstant.NOT_LOGIN,null, null);
+        return new AjaxJson(CODE_NOT_LOGIN, MessageConstant.NOT_LOGIN, null, null);
     }
-
 
     /**
      * 返回没有权限的
@@ -251,7 +246,7 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
     }
 
     /**
-     * 返回，根据布尔值来确定最终结果的  (true=ok，false=error)
+     * 返回，根据布尔值来确定最终结果的 (true=ok，false=error)
      */
     public static AjaxJson getByBoolean(boolean b) {
         return b ? getSuccess(MessageConstant.SUCCESS) : getError(MessageConstant.OPERATE_FAILED);
@@ -261,9 +256,8 @@ public class AjaxJson extends LinkedHashMap<String, Object> implements Serializa
         return b ? getSuccess(MessageConstant.SUCCESS) : getError(errorMsg);
     }
 
-    public static AjaxJson getByBoolean(boolean b ,String successMsg, String errorMsg) {
+    public static AjaxJson getByBoolean(boolean b, String successMsg, String errorMsg) {
         return b ? getSuccess(successMsg) : getError(errorMsg);
     }
-
 
 }

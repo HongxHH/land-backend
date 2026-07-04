@@ -94,7 +94,7 @@ public class SysUserServiceImpl implements SysUserService {
 
         } catch (Exception e) {
             log.error("创建用户失败: username={}, error={}", userDTO.getUsername(), e.getMessage(), e);
-            return AjaxJson.getError("创建用户失败: " + e.getMessage());
+            return AjaxJson.getError("创建用户失败");
         }
     }
 
@@ -123,7 +123,7 @@ public class SysUserServiceImpl implements SysUserService {
             return AjaxJson.getSuccess("注册成功，请登录");
         } catch (Exception e) {
             log.error("用户注册失败: username={}, error={}", request.getUsername(), e.getMessage(), e);
-            return AjaxJson.getError("注册失败: " + e.getMessage());
+            return AjaxJson.getError("注册失败");
         }
     }
 
@@ -170,7 +170,7 @@ public class SysUserServiceImpl implements SysUserService {
             return AjaxJson.getSuccessData(toUserVO(user));
         } catch (Exception e) {
             log.error("更新个人信息失败: error={}", e.getMessage(), e);
-            return AjaxJson.getError("更新个人信息失败: " + e.getMessage());
+            return AjaxJson.getError("更新个人信息失败");
         }
     }
 
@@ -219,7 +219,7 @@ public class SysUserServiceImpl implements SysUserService {
             return AjaxJson.getSuccess("权限类型已更新");
         } catch (Exception e) {
             log.error("更新用户类型失败: userId={}, error={}", userId, e.getMessage(), e);
-            return AjaxJson.getError("更新用户类型失败: " + e.getMessage());
+            return AjaxJson.getError("更新用户类型失败");
         }
     }
 
@@ -242,7 +242,7 @@ public class SysUserServiceImpl implements SysUserService {
             return AjaxJson.getSuccess("密码已更新");
         } catch (Exception e) {
             log.error("重置用户密码失败: userId={}, error={}", userId, e.getMessage(), e);
-            return AjaxJson.getError("重置用户密码失败: " + e.getMessage());
+            return AjaxJson.getError("重置用户密码失败");
         }
     }
 
@@ -290,7 +290,7 @@ public class SysUserServiceImpl implements SysUserService {
 
         } catch (Exception e) {
             log.error("更新用户信息失败: id={}, error={}", userId, e.getMessage(), e);
-            return AjaxJson.getError("更新用户信息失败: " + e.getMessage());
+            return AjaxJson.getError("更新用户信息失败");
         }
     }
 
@@ -316,7 +316,7 @@ public class SysUserServiceImpl implements SysUserService {
 
         } catch (Exception e) {
             log.error("删除用户失败: id={}, error={}", userId, e.getMessage(), e);
-            return AjaxJson.getError("删除用户失败: " + e.getMessage());
+            return AjaxJson.getError("删除用户失败");
         }
     }
 
@@ -383,7 +383,7 @@ public class SysUserServiceImpl implements SysUserService {
 
         } catch (Exception e) {
             log.error("分页查询用户列表失败: error={}", e.getMessage(), e);
-            return AjaxJson.getError("查询用户列表失败: " + e.getMessage());
+            return AjaxJson.getError("查询用户列表失败");
         }
     }
 
@@ -411,7 +411,7 @@ public class SysUserServiceImpl implements SysUserService {
 
         } catch (Exception e) {
             log.error("切换用户状态失败: id={}, error={}", userId, e.getMessage(), e);
-            return AjaxJson.getError("切换用户状态失败: " + e.getMessage());
+            return AjaxJson.getError("切换用户状态失败");
         }
     }
 
@@ -430,7 +430,7 @@ public class SysUserServiceImpl implements SysUserService {
 
         } catch (Exception e) {
             log.error("更新用户最后登录时间失败: id={}, error={}", userId, e.getMessage(), e);
-            return AjaxJson.getError("更新登录时间失败: " + e.getMessage());
+            return AjaxJson.getError("更新登录时间失败");
         }
     }
 

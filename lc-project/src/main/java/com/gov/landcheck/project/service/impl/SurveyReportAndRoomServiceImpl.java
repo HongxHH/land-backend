@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -29,8 +31,7 @@ import com.gov.landcheck.core.bo.entity.Project;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.common.ValidationResult;
-import com.gov.landcheck.core.config.cache.config.CacheProperties;
-import com.gov.landcheck.core.config.cache.model.CacheLoadOptions;
+import com.gov.landcheck.core.config.cache.model.CacheLoadOptionsFactory;
 import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
@@ -52,6 +53,7 @@ import com.gov.landcheck.project.vo.RoomInfoVO;
 import com.gov.landcheck.project.vo.SurveyReportInfoVO;
 
 @Service
+@Slf4j
 public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomService {
 
     private static final long DOUBLE_DELETE_DELAY_MS = 500L;
@@ -66,7 +68,7 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
     private CacheInvalidationService cacheInvalidationService;
 
     @Autowired
-    private CacheProperties cacheProperties;
+    private CacheLoadOptionsFactory cacheLoadOptionsFactory;
 
     @Autowired
     private ProjectCacheKeys projectCacheKeys;
@@ -80,21 +82,22 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             return AjaxJson.getError("项目ID不能为空");
         }
         String key = projectCacheKeys.parsedReportsByProject(projectId);
-        List<SurveyReportInfoVO> data = cacheOpsService.getOrLoad(key, byRelationOptions(), () -> {
-            Query query = new Query(Criteria.where("project_id").is(projectId).and("is_parsed").is(1));
-            List<SurveyReportInfo> reports = mongoTemplate.find(query, SurveyReportInfo.class);
-            if (CollectionUtils.isEmpty(reports)) {
-                return new ArrayList<>();
-            }
-            List<Long> fileRecordIds = reports.stream()
-                    .map(SurveyReportInfo::getFileRecordId)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .collect(Collectors.toList());
-            Map<Long, String> fileRecordIdToOriginalName = buildFileRecordIdToOriginalNameMap(fileRecordIds);
-            return reports.stream().map(report -> toSurveyReportInfoVO(report, fileRecordIdToOriginalName))
-                    .collect(Collectors.toList());
-        });
+        List<SurveyReportInfoVO> data = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.byRelationOptions(),
+                () -> {
+                    Query query = new Query(Criteria.where("project_id").is(projectId).and("is_parsed").is(1));
+                    List<SurveyReportInfo> reports = mongoTemplate.find(query, SurveyReportInfo.class);
+                    if (CollectionUtils.isEmpty(reports)) {
+                        return new ArrayList<>();
+                    }
+                    List<Long> fileRecordIds = reports.stream()
+                            .map(SurveyReportInfo::getFileRecordId)
+                            .filter(Objects::nonNull)
+                            .distinct()
+                            .collect(Collectors.toList());
+                    Map<Long, String> fileRecordIdToOriginalName = buildFileRecordIdToOriginalNameMap(fileRecordIds);
+                    return reports.stream().map(report -> toSurveyReportInfoVO(report, fileRecordIdToOriginalName))
+                            .collect(Collectors.toList());
+                });
         return AjaxJson.getSuccessData(data);
     }
 
@@ -107,7 +110,7 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             return AjaxJson.getError("实测报告ID不能为空");
         }
         String key = projectCacheKeys.roomsByProjectAndSurveyReport(projectId, surveyReportId);
-        List<RoomInfoVO> data = cacheOpsService.getOrLoad(key, byRelationOptions(), () -> {
+        List<RoomInfoVO> data = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.byRelationOptions(), () -> {
             Query query = new Query(
                     Criteria.where("project_id").is(projectId).and("survey_report_info_id").is(surveyReportId));
             List<RoomInfo> roomInfos = mongoTemplate.find(query, RoomInfo.class);
@@ -124,7 +127,7 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
     public AjaxJson querySurveyReportInfos(SurveyReportInfoQueryDTO queryDTO) {
         SurveyReportInfoQueryDTO normalized = queryDTO == null ? new SurveyReportInfoQueryDTO() : queryDTO;
         String key = projectCacheKeys.querySurveyReports(normalized);
-        SurveyReportInfoQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        SurveyReportInfoQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> querySurveyReportInfosInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -133,7 +136,7 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
     public AjaxJson queryRoomInfos(RoomInfoQueryDTO queryDTO) {
         RoomInfoQueryDTO normalized = queryDTO == null ? new RoomInfoQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryRooms(normalized);
-        RoomInfoQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        RoomInfoQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> queryRoomInfosInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -161,7 +164,8 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("实测报告更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to update survey report: " + e.getMessage());
+            log.error("Failed to update survey report", e);
+            return AjaxJson.getError("Failed to update survey report");
         }
     }
 
@@ -225,7 +229,8 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("户室信息创建成功", saved);
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to create room info: " + e.getMessage());
+            log.error("Failed to create room info", e);
+            return AjaxJson.getError("Failed to create room info");
         }
     }
 
@@ -251,7 +256,8 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("房间信息更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to update room info: " + e.getMessage());
+            log.error("Failed to update room info", e);
+            return AjaxJson.getError("Failed to update room info");
         }
     }
 
@@ -275,7 +281,8 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("房间删除成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to delete room info: " + e.getMessage());
+            log.error("Failed to delete room info", e);
+            return AjaxJson.getError("Failed to delete room info");
         }
     }
 
@@ -297,7 +304,8 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("实测报告刷新完成");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to refresh survey report: " + e.getMessage());
+            log.error("Failed to refresh survey report", e);
+            return AjaxJson.getError("Failed to refresh survey report");
         }
     }
 
@@ -387,25 +395,5 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
     private void evictAfterWrite(Set<String> directKeys, String queryPattern) {
         cacheInvalidationService.evictTwice(directKeys, DOUBLE_DELETE_DELAY_MS);
         cacheInvalidationService.evictByPatternTwice(Set.of(queryPattern), DOUBLE_DELETE_DELAY_MS);
-    }
-
-    private CacheLoadOptions byRelationOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getByRelation())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
-    }
-
-    private CacheLoadOptions queryOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getQuery())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
     }
 }

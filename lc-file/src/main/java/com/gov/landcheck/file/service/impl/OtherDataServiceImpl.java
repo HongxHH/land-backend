@@ -17,6 +17,9 @@ import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.OCRExecutionResult;
 import com.gov.landcheck.core.bo.entity.ParsedDataHeader;
 import com.gov.landcheck.core.common.MessageConstant;
+import com.gov.landcheck.core.config.query.MongoRegexCriteria;
+import com.gov.landcheck.core.config.query.MongoSortFields;
+import com.gov.landcheck.core.config.query.SafePageSort;
 import com.gov.landcheck.file.dto.*;
 import com.gov.landcheck.file.utils.GridFSUtils;
 
@@ -109,9 +112,7 @@ public class OtherDataServiceImpl implements OtherDataService {
             }
 
             // 原始文件名模糊查询
-            if (StringUtils.hasText(queryDTO.getOriginalFileName())) {
-                criteria.and("original_file_name").regex(queryDTO.getOriginalFileName(), "i");
-            }
+            addSafeRegex(criteria, "original_file_name", queryDTO.getOriginalFileName());
 
             // 是否为扫描件查询
             if (queryDTO.getIsScanned() != null) {
@@ -141,9 +142,12 @@ public class OtherDataServiceImpl implements OtherDataService {
             Query query = new Query(criteria);
 
             // 排序
-            Sort.Direction direction = "desc".equalsIgnoreCase(queryDTO.getSortDirection()) ? Sort.Direction.DESC
-                    : Sort.Direction.ASC;
-            query.with(Sort.by(direction, queryDTO.getSortField()));
+            Sort sort = SafePageSort.resolve(
+                    queryDTO.getSortDirection(),
+                    queryDTO.getSortField(),
+                    "createTime",
+                    MongoSortFields.PARSED_DATA);
+            query.with(sort);
 
             // 分页
             int pageNum = queryDTO.getPageNum() != null && queryDTO.getPageNum() > 0 ? queryDTO.getPageNum() : 1;
@@ -167,7 +171,7 @@ public class OtherDataServiceImpl implements OtherDataService {
 
         } catch (Exception e) {
             log.error("解析数据头表查询失败: error={}", e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析数据头表查询失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析数据头表查询失败");
         }
     }
 
@@ -180,21 +184,11 @@ public class OtherDataServiceImpl implements OtherDataService {
             if (queryDTO.getHeaderId() != null) {
                 criteria.and("header_id").is(queryDTO.getHeaderId());
             }
-            if (StringUtils.hasText(queryDTO.getDataCategory())) {
-                criteria.and("data_category").regex(queryDTO.getDataCategory(), "i");
-            }
-            if (StringUtils.hasText(queryDTO.getFieldKey())) {
-                criteria.and("field_key").regex(queryDTO.getFieldKey(), "i");
-            }
-            if (StringUtils.hasText(queryDTO.getFieldValue())) {
-                criteria.and("field_value").regex(queryDTO.getFieldValue(), "i");
-            }
-            if (StringUtils.hasText(queryDTO.getNormalizedKey())) {
-                criteria.and("normalized_key").regex(queryDTO.getNormalizedKey(), "i");
-            }
-            if (StringUtils.hasText(queryDTO.getNormalizedValue())) {
-                criteria.and("normalized_value").regex(queryDTO.getNormalizedValue(), "i");
-            }
+            addSafeRegex(criteria, "data_category", queryDTO.getDataCategory());
+            addSafeRegex(criteria, "field_key", queryDTO.getFieldKey());
+            addSafeRegex(criteria, "field_value", queryDTO.getFieldValue());
+            addSafeRegex(criteria, "normalized_key", queryDTO.getNormalizedKey());
+            addSafeRegex(criteria, "normalized_value", queryDTO.getNormalizedValue());
             if (StringUtils.hasText(queryDTO.getFieldType())) {
                 criteria.and("field_type").is(queryDTO.getFieldType());
             }
@@ -215,7 +209,11 @@ public class OtherDataServiceImpl implements OtherDataService {
 
             int pageNum = resolvePageNum(queryDTO.getPageNum());
             int pageSize = resolvePageSize(queryDTO.getPageSize());
-            Sort sort = resolveSort(queryDTO.getSortDirection(), queryDTO.getSortField(), "createTime");
+            Sort sort = SafePageSort.resolve(
+                    queryDTO.getSortDirection(),
+                    queryDTO.getSortField(),
+                    "createTime",
+                    MongoSortFields.PARSED_DATA);
             Pageable pageable = PageRequest.of(pageNum - 1, pageSize, sort);
             query.with(pageable);
 
@@ -235,7 +233,7 @@ public class OtherDataServiceImpl implements OtherDataService {
             return AjaxJson.getSuccess("查询成功").setData(result);
         } catch (Exception e) {
             log.error("解析数据明细表查询失败: error={}", e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析数据明细表查询失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析数据明细表查询失败");
         }
     }
 
@@ -251,9 +249,7 @@ public class OtherDataServiceImpl implements OtherDataService {
             if (queryDTO.getJobStatus() != null) {
                 criteria.and("job_status").is(queryDTO.getJobStatus());
             }
-            if (StringUtils.hasText(queryDTO.getWorkerNode())) {
-                criteria.and("worker_node").regex(queryDTO.getWorkerNode(), "i");
-            }
+            addSafeRegex(criteria, "worker_node", queryDTO.getWorkerNode());
             if (queryDTO.getAttemptCount() != null) {
                 criteria.and("attempt_count").is(queryDTO.getAttemptCount());
             }
@@ -291,7 +287,11 @@ public class OtherDataServiceImpl implements OtherDataService {
 
             int pageNum = resolvePageNum(queryDTO.getPageNum());
             int pageSize = resolvePageSize(queryDTO.getPageSize());
-            Sort sort = resolveSort(queryDTO.getSortDirection(), queryDTO.getSortField(), "createTime");
+            Sort sort = SafePageSort.resolve(
+                    queryDTO.getSortDirection(),
+                    queryDTO.getSortField(),
+                    "createTime",
+                    MongoSortFields.PARSE_JOB);
             Pageable pageable = PageRequest.of(pageNum - 1, pageSize, sort);
             query.with(pageable);
 
@@ -310,7 +310,7 @@ public class OtherDataServiceImpl implements OtherDataService {
             return AjaxJson.getSuccess("查询成功").setData(result);
         } catch (Exception e) {
             log.error("解析任务表查询失败: error={}", e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务表查询失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务表查询失败");
         }
     }
 
@@ -364,7 +364,11 @@ public class OtherDataServiceImpl implements OtherDataService {
 
             int pageNum = resolvePageNum(queryDTO.getPageNum());
             int pageSize = resolvePageSize(queryDTO.getPageSize());
-            Sort sort = resolveSort(queryDTO.getSortDirection(), queryDTO.getSortField(), "createTime");
+            Sort sort = SafePageSort.resolve(
+                    queryDTO.getSortDirection(),
+                    queryDTO.getSortField(),
+                    "createTime",
+                    MongoSortFields.OCR_RESULT);
             Pageable pageable = PageRequest.of(pageNum - 1, pageSize, sort);
             query.with(pageable);
 
@@ -388,7 +392,7 @@ public class OtherDataServiceImpl implements OtherDataService {
             return AjaxJson.getSuccess("查询成功").setData(result);
         } catch (Exception e) {
             log.error("OCR执行结果表查询失败: error={}", e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "OCR执行结果表查询失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "OCR执行结果表查询失败");
         }
     }
 
@@ -400,17 +404,11 @@ public class OtherDataServiceImpl implements OtherDataService {
         return (pageSize != null && pageSize > 0) ? pageSize : 10;
     }
 
-    private Sort resolveSort(String sortDirection, String sortField, String defaultField) {
-        Sort.Direction direction = Sort.Direction.DESC;
-        if (StringUtils.hasText(sortDirection)) {
-            try {
-                direction = Sort.Direction.fromString(sortDirection.trim());
-            } catch (IllegalArgumentException ex) {
-                log.debug("非法排序方向 [{}]，回退为 DESC", sortDirection);
-            }
+    private static void addSafeRegex(Criteria criteria, String mongoField, String rawValue) {
+        if (!StringUtils.hasText(rawValue)) {
+            return;
         }
-        String field = StringUtils.hasText(sortField) ? sortField.trim() : defaultField;
-        return Sort.by(direction, field);
+        criteria.andOperator(MongoRegexCriteria.like(mongoField, rawValue));
     }
 
     /**

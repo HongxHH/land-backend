@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -27,8 +29,7 @@ import com.gov.landcheck.core.audit.TargetType;
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
-import com.gov.landcheck.core.config.cache.config.CacheProperties;
-import com.gov.landcheck.core.config.cache.model.CacheLoadOptions;
+import com.gov.landcheck.core.config.cache.model.CacheLoadOptionsFactory;
 import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
@@ -43,6 +44,7 @@ import com.gov.landcheck.project.utils.PageSortSupport;
 import com.gov.landcheck.project.vo.ProjectPartySummaryFormVO;
 
 @Service
+@Slf4j
 public class ProjectPartySummaryServiceImpl implements ProjectPartySummaryService {
 
     private static final long DOUBLE_DELETE_DELAY_MS = 500L;
@@ -57,7 +59,7 @@ public class ProjectPartySummaryServiceImpl implements ProjectPartySummaryServic
     private CacheInvalidationService cacheInvalidationService;
 
     @Autowired
-    private CacheProperties cacheProperties;
+    private CacheLoadOptionsFactory cacheLoadOptionsFactory;
 
     @Autowired
     private ProjectCacheKeys projectCacheKeys;
@@ -68,7 +70,7 @@ public class ProjectPartySummaryServiceImpl implements ProjectPartySummaryServic
                 : queryDTO;
         String key = projectCacheKeys.queryProjectPartySummaryForms(normalized);
         ProjectPartySummaryFormQueryResultDTO result = cacheOpsService.getOrLoad(
-                key, queryOptions(), () -> queryProjectPartySummaryFormsInternal(normalized));
+                key, cacheLoadOptionsFactory.queryOptions(), () -> queryProjectPartySummaryFormsInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
 
@@ -89,7 +91,8 @@ public class ProjectPartySummaryServiceImpl implements ProjectPartySummaryServic
             evictAfterWrite(directKeys);
             return AjaxJson.getSuccess("项目方实测汇总主表更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("更新项目方实测汇总主表失败: " + e.getMessage());
+            log.error("更新项目方实测汇总主表失败", e);
+            return AjaxJson.getError("更新项目方实测汇总主表失败");
         }
     }
 
@@ -171,15 +174,5 @@ public class ProjectPartySummaryServiceImpl implements ProjectPartySummaryServic
     private void evictAfterWrite(Set<String> directKeys) {
         cacheInvalidationService.evictTwice(directKeys, DOUBLE_DELETE_DELAY_MS);
         cacheInvalidationService.evictByPatternTwice(Set.of(projectCacheKeys.queryPattern()), DOUBLE_DELETE_DELAY_MS);
-    }
-
-    private CacheLoadOptions queryOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getQuery())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
     }
 }

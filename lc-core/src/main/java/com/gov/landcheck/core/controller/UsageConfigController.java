@@ -21,6 +21,9 @@ import com.gov.landcheck.core.bo.dto.UsageConfigRelatedFileQueryResultDTO;
 import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.core.service.UsageConfigService;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaMode;
+import com.gov.landcheck.core.common.UserTypeConstants;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -77,6 +80,7 @@ public class UsageConfigController {
 
     @Operation(summary = "新增用途配置")
     @PostMapping
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson create(@RequestBody UsageConfig usageConfig) {
         UsageConfig saved = usageConfigService.create(usageConfig);
         if (saved.getUsagePattern() != null && saved.getStatus() != null && saved.getStatus() == 1) {
@@ -88,6 +92,7 @@ public class UsageConfigController {
 
     @Operation(summary = "更新用途配置")
     @PutMapping("/{id}")
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson update(@PathVariable Long id, @RequestBody UsageConfig usageConfig) {
         usageConfig.setId(id);
         UsageConfig saved = usageConfigService.update(usageConfig);
@@ -100,6 +105,7 @@ public class UsageConfigController {
 
     @Operation(summary = "删除用途配置")
     @DeleteMapping("/{id}")
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson delete(@PathVariable Long id) {
         usageConfigService.deleteById(id);
         return AjaxJson.getSuccess();
@@ -146,6 +152,7 @@ public class UsageConfigController {
 
     @Operation(summary = "基于未知用途创建新用途配置")
     @PostMapping("/create-from-unknown")
+    @SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
     public AjaxJson createFromUnknownUsage(
             @Parameter(description = "未知用途记录ID") @RequestParam Long unknownUsageId,
             @Parameter(description = "用途类别(RESIDENTIAL/COMMERCIAL/MANAGEMENT/OTHER_BUILDABLE/COMMUNITY/OTHER_PUBLIC)") @RequestParam String usageCategory,

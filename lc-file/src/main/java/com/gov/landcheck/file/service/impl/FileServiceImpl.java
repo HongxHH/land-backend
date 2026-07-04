@@ -60,6 +60,8 @@ import com.gov.landcheck.core.bo.entity.UnknownUsageRecord;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
+import com.gov.landcheck.core.config.query.MongoSortFields;
+import com.gov.landcheck.core.config.query.SafePageSort;
 import com.gov.landcheck.core.audit.FileOperationAuthorization;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
@@ -72,7 +74,7 @@ import com.gov.landcheck.file.dto.FileQueryDTO;
 import com.gov.landcheck.file.dto.FileQueryResultDTO;
 import com.gov.landcheck.file.dto.SubmitParseResult;
 import com.gov.landcheck.file.service.FileService;
-import com.gov.landcheck.file.service.InvalidGridFsFileCleanup;
+import com.gov.landcheck.core.utils.UploadFileNameSanitizer;
 import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
 import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
@@ -91,7 +93,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Service
 @Slf4j
-public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
+public class FileServiceImpl implements FileService {
 
     @Resource
     private MongoTemplate mongoTemplate; // 用于操作MongoDB
@@ -230,7 +232,7 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
 
         } catch (Exception e) {
             log.error("获取解析状态失败: fileId={}, error={}", fileId, e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取解析状态失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取解析状态失败");
         }
     }
 
@@ -330,7 +332,7 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
 
         } catch (Exception e) {
             log.error("取消解析任务失败: fileId={}, error={}", fileId, e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "取消解析任务失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "取消解析任务失败");
         }
     }
 
@@ -383,7 +385,7 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
 
         } catch (Exception e) {
             log.error("删除文件失败: fileId={}, error={}", fileId, e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "删除文件失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "删除文件失败");
         }
     }
 
@@ -778,9 +780,9 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不能为空");
         }
 
-        String originFileName = uploadDTO.getFile().getOriginalFilename();
+        String originFileName = UploadFileNameSanitizer.sanitize(uploadDTO.getFile().getOriginalFilename());
         if (!StringUtils.hasText(originFileName)) {
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件名不能为空");
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件名非法");
         }
 
         Project project = mongoTemplate.findById(uploadDTO.getProjectId(), Project.class);
@@ -842,14 +844,15 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
             return AjaxJson.getSuccess("文件已入库，正在后台后处理").setData(result);
 
         } catch (UploadCommitException e) {
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, e.getMessage());
+            log.warn("文件提交失败: {}", e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件提交失败");
         } catch (Exception e) {
             if (committedFileId != null) {
                 rollbackCommittedFile(committedFileId, uploadDTO.getProjectId(), e);
             }
             log.error("提交文件上传后处理失败: projectId={}, fileName={}, error={}",
                     uploadDTO.getProjectId(), originFileName, e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "提交文件上传后处理失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "提交文件上传后处理失败");
         }
     }
 
@@ -891,7 +894,10 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
             Long archiveId,
             Long userId,
             String userName) {
-        String originFileName = file.getOriginalFilename();
+        String originFileName = UploadFileNameSanitizer.sanitize(file.getOriginalFilename());
+        if (!StringUtils.hasText(originFileName)) {
+            throw new UploadCommitException("文件名非法");
+        }
         FileType fileType = FileType.getFileTypeByFileName(originFileName);
 
         FileRecord fileRecord = new FileRecord();
@@ -1121,10 +1127,11 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
             Query query = new Query(criteria);
 
             // 排序与分页
-            Sort.Direction direction = Sort.Direction.fromString(
-                    StringUtils.hasText(queryDTO.getSortDirection()) ? queryDTO.getSortDirection() : "desc");
-            String sortField = StringUtils.hasText(queryDTO.getSortField()) ? queryDTO.getSortField() : "upload_time";
-            Sort sort = Sort.by(direction, sortField);
+            Sort sort = SafePageSort.resolve(
+                    queryDTO.getSortDirection(),
+                    queryDTO.getSortField(),
+                    "upload_time",
+                    MongoSortFields.FILE_RECORD);
             int pageNum = queryDTO.getPageNum() != null && queryDTO.getPageNum() > 0 ? queryDTO.getPageNum() : 1;
             int pageSize = queryDTO.getPageSize() != null && queryDTO.getPageSize() > 0 ? queryDTO.getPageSize() : 10;
             Pageable pageable = PageRequest.of(pageNum - 1, pageSize, sort);
@@ -1159,7 +1166,7 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
 
         } catch (Exception e) {
             log.error("文件查询失败: error={}", e.getMessage(), e);
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件查询失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件查询失败");
         }
     }
 
@@ -1232,6 +1239,18 @@ public class FileServiceImpl implements FileService, InvalidGridFsFileCleanup {
             }
         }
         return vo;
+    }
+
+    @Override
+    public boolean isRegisteredGridFsId(String gridFsId) {
+        if (!StringUtils.hasText(gridFsId)) {
+            return false;
+        }
+        String trimmed = gridFsId.trim();
+        Criteria criteria = new Criteria().orOperator(
+                Criteria.where("gridfs_id").is(trimmed),
+                Criteria.where("thumb_gridfs_id").is(trimmed));
+        return mongoTemplate.exists(new Query(criteria), FileRecord.class);
     }
 
     /** 实测报告校验状态，仅用于 Service 内部映射，不对外暴露 */

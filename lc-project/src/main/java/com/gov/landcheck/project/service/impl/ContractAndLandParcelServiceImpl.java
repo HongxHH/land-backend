@@ -27,8 +27,7 @@ import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.ContractInfo;
 import com.gov.landcheck.core.bo.entity.LandParcel;
 import com.gov.landcheck.core.bo.entity.Project;
-import com.gov.landcheck.core.config.cache.config.CacheProperties;
-import com.gov.landcheck.core.config.cache.model.CacheLoadOptions;
+import com.gov.landcheck.core.config.cache.model.CacheLoadOptionsFactory;
 import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
@@ -66,7 +65,7 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
     private CacheOpsService cacheOpsService;
 
     @Autowired
-    private CacheProperties cacheProperties;
+    private CacheLoadOptionsFactory cacheLoadOptionsFactory;
 
     @Autowired
     private ProjectCacheKeys projectCacheKeys;
@@ -78,7 +77,7 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
     public AjaxJson queryContractInfos(ContractInfoQueryDTO queryDTO) {
         ContractInfoQueryDTO normalized = queryDTO == null ? new ContractInfoQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryContracts(normalized);
-        ContractInfoQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        ContractInfoQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> queryContractInfosInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -114,7 +113,8 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("合同信息更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to update contract: " + e.getMessage());
+            log.error("Failed to update contract", e);
+            return AjaxJson.getError("Failed to update contract");
         }
     }
 
@@ -124,21 +124,22 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
             return AjaxJson.getError("合同ID不能为空");
         }
         String key = projectCacheKeys.contractWithParcels(contractId);
-        ContractWithParcelsDTO data = cacheOpsService.getOrLoad(key, byRelationOptions(), () -> {
-            Query contractQuery = new Query(Criteria.where("_id").is(contractId));
-            ContractInfo contractInfo = mongoTemplate.findOne(contractQuery, ContractInfo.class);
-            if (contractInfo == null) {
-                return null;
-            }
-            Query parcelsQuery = new Query(Criteria.where("contract_id").is(contractId));
-            List<LandParcel> parcels = mongoTemplate.find(parcelsQuery, LandParcel.class);
-            ContractSummary summary = calculateContractSummary(parcels);
-            ContractWithParcelsDTO result = new ContractWithParcelsDTO();
-            result.setContractInfo(contractInfo);
-            result.setParcels(parcels != null ? parcels : new ArrayList<>());
-            result.setSummary(summary);
-            return result;
-        });
+        ContractWithParcelsDTO data = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.byRelationOptions(),
+                () -> {
+                    Query contractQuery = new Query(Criteria.where("_id").is(contractId));
+                    ContractInfo contractInfo = mongoTemplate.findOne(contractQuery, ContractInfo.class);
+                    if (contractInfo == null) {
+                        return null;
+                    }
+                    Query parcelsQuery = new Query(Criteria.where("contract_id").is(contractId));
+                    List<LandParcel> parcels = mongoTemplate.find(parcelsQuery, LandParcel.class);
+                    ContractSummary summary = calculateContractSummary(parcels);
+                    ContractWithParcelsDTO result = new ContractWithParcelsDTO();
+                    result.setContractInfo(contractInfo);
+                    result.setParcels(parcels != null ? parcels : new ArrayList<>());
+                    result.setSummary(summary);
+                    return result;
+                });
         if (data == null) {
             return AjaxJson.getError("Contract not found");
         }
@@ -195,7 +196,8 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("地块创建成功", savedParcel);
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to create land parcel: " + e.getMessage());
+            log.error("Failed to create land parcel", e);
+            return AjaxJson.getError("Failed to create land parcel");
         }
     }
 
@@ -241,7 +243,8 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("地块信息更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to update land parcel: " + e.getMessage());
+            log.error("Failed to update land parcel", e);
+            return AjaxJson.getError("Failed to update land parcel");
         }
     }
 
@@ -268,7 +271,8 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("地块删除成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to delete land parcel: " + e.getMessage());
+            log.error("Failed to delete land parcel", e);
+            return AjaxJson.getError("Failed to delete land parcel");
         }
     }
 
@@ -370,26 +374,6 @@ public class ContractAndLandParcelServiceImpl implements ContractAndLandParcelSe
         result.setTotal(total);
         result.setPages((int) Math.ceil((double) total / pageSize));
         return result;
-    }
-
-    private CacheLoadOptions queryOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getQuery())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
-    }
-
-    private CacheLoadOptions byRelationOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getByRelation())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
     }
 
     @Override

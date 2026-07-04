@@ -41,8 +41,7 @@ import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.bo.entity.UnknownUsageRecord;
-import com.gov.landcheck.core.config.cache.config.CacheProperties;
-import com.gov.landcheck.core.config.cache.model.CacheLoadOptions;
+import com.gov.landcheck.core.config.cache.model.CacheLoadOptionsFactory;
 import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
@@ -85,7 +84,7 @@ public class ProjectServiceImpl implements ProjectService {
     private CacheInvalidationService cacheInvalidationService;
 
     @Autowired
-    private CacheProperties cacheProperties;
+    private CacheLoadOptionsFactory cacheLoadOptionsFactory;
 
     @Autowired
     private ProjectCacheKeys projectCacheKeys;
@@ -111,7 +110,7 @@ public class ProjectServiceImpl implements ProjectService {
             return AjaxJson.getError("项目ID不能为空");
         }
         String key = projectCacheKeys.projectById(projectId);
-        ProjectVO projectVO = cacheOpsService.getOrLoad(key, byIdOptions(), () -> {
+        ProjectVO projectVO = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.byIdOptions(), () -> {
             Query query = new Query(Criteria.where("_id").is(projectId));
             Project project = mongoTemplate.findOne(query, Project.class);
             if (project == null) {
@@ -131,7 +130,7 @@ public class ProjectServiceImpl implements ProjectService {
     public AjaxJson queryProjects(ProjectQueryDTO queryDTO) {
         ProjectQueryDTO normalized = queryDTO == null ? new ProjectQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryProjects(normalized);
-        ProjectQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        ProjectQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> queryProjectsInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -140,7 +139,7 @@ public class ProjectServiceImpl implements ProjectService {
     public AjaxJson queryProjectDetails(ProjectQueryDTO queryDTO) {
         ProjectQueryDTO normalized = queryDTO == null ? new ProjectQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryProjectDetails(normalized);
-        ProjectDetailQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        ProjectDetailQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> queryProjectDetailsInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -178,7 +177,8 @@ public class ProjectServiceImpl implements ProjectService {
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("项目创建成功").setData(savedProject);
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to create project: " + e.getMessage());
+            log.error("Failed to create project", e);
+            return AjaxJson.getError("Failed to create project");
         }
     }
 
@@ -218,7 +218,8 @@ public class ProjectServiceImpl implements ProjectService {
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("项目信息更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to update project: " + e.getMessage());
+            log.error("Failed to update project", e);
+            return AjaxJson.getError("Failed to update project");
         }
     }
 
@@ -243,7 +244,8 @@ public class ProjectServiceImpl implements ProjectService {
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("Survey report refresh completed, total: " + surveyReports.size());
         } catch (Exception e) {
-            return AjaxJson.getError("Failed to refresh survey reports: " + e.getMessage());
+            log.error("Failed to refresh survey reports", e);
+            return AjaxJson.getError("Failed to refresh survey reports");
         }
     }
 
@@ -257,7 +259,7 @@ public class ProjectServiceImpl implements ProjectService {
             return AjaxJson.getError("Project not found");
         }
         String key = projectCacheKeys.areaComparisonByProject(projectId);
-        var comparison = cacheOpsService.getOrLoad(key, byRelationOptions(),
+        var comparison = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.byRelationOptions(),
                 () -> projectAreaComparisonService.buildComparison(projectId));
         return AjaxJson.getSuccessData(comparison);
     }
@@ -324,7 +326,7 @@ public class ProjectServiceImpl implements ProjectService {
             return AjaxJson.getSuccess("项目删除成功");
         } catch (Exception e) {
             log.error("删除项目失败, projectId={}", projectId, e);
-            return AjaxJson.getError("删除项目失败: " + e.getMessage());
+            return AjaxJson.getError("删除项目失败");
         }
     }
 
@@ -745,35 +747,5 @@ public class ProjectServiceImpl implements ProjectService {
     private void evictAfterWrite(Set<String> directKeys, String queryPattern) {
         cacheInvalidationService.evictTwice(directKeys, DOUBLE_DELETE_DELAY_MS);
         cacheInvalidationService.evictByPatternTwice(Set.of(queryPattern), DOUBLE_DELETE_DELAY_MS);
-    }
-
-    private CacheLoadOptions byIdOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getById())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
-    }
-
-    private CacheLoadOptions byRelationOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getByRelation())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
-    }
-
-    private CacheLoadOptions queryOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getQuery())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
     }
 }

@@ -9,6 +9,9 @@ import com.gov.landcheck.core.audit.OperationAuditService;
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.dto.OperationAuditLogQueryDTO;
 
+import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.annotation.SaMode;
+import com.gov.landcheck.core.common.UserTypeConstants;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,6 +24,7 @@ import jakarta.annotation.Resource;
 @Tag(name = "操作审计日志", description = "操作溯源审计日志的查询接口")
 @RestController
 @RequestMapping("/operation-audit")
+@SaCheckRole(value = { UserTypeConstants.SUPER_ADMIN, UserTypeConstants.DEVELOPER }, mode = SaMode.OR)
 public class OperationAuditLogController {
 
     @Resource

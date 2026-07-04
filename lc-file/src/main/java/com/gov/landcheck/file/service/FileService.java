@@ -124,4 +124,14 @@ public interface FileService {
      */
     AjaxJson queryFiles(FileQueryDTO queryDTO);
 
+    /**
+     * 校验 GridFS 文件 ID 是否已登记在 FileRecord（主文件或缩略图）。
+     */
+    boolean isRegisteredGridFsId(String gridFsId);
+
+    /**
+     * GridFS 缺失等场景下，按与删除相同的顺序级联清理文件相关数据。
+     */
+    void cleanupFileRecordWhenGridFsMissing(FileRecord fileRecord);
+
 }

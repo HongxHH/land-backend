@@ -53,8 +53,9 @@ public interface SysUserService {
     /**
      * 超级管理员重置用户密码。
      */
-    AjaxJson updateUserPassword(Long userId, String newPassword);**
+    AjaxJson updateUserPassword(Long userId, String newPassword);
 
+    /**
      * 根据ID删除用户
      *
      * @param userId 用户ID

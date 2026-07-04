@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -24,8 +26,7 @@ import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.PlanningReviewForm;
 import com.gov.landcheck.core.bo.entity.PlanningReviewRow;
 import com.gov.landcheck.core.bo.entity.Project;
-import com.gov.landcheck.core.config.cache.config.CacheProperties;
-import com.gov.landcheck.core.config.cache.model.CacheLoadOptions;
+import com.gov.landcheck.core.config.cache.model.CacheLoadOptionsFactory;
 import com.gov.landcheck.core.config.cache.service.CacheInvalidationService;
 import com.gov.landcheck.core.config.cache.service.CacheOpsService;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
@@ -43,6 +44,7 @@ import com.gov.landcheck.project.utils.DynamicUpdateHelper;
 import com.gov.landcheck.project.utils.PageSortSupport;
 
 @Service
+@Slf4j
 public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowService {
 
     private static final long DOUBLE_DELETE_DELAY_MS = 500L;
@@ -57,7 +59,7 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     private CacheInvalidationService cacheInvalidationService;
 
     @Autowired
-    private CacheProperties cacheProperties;
+    private CacheLoadOptionsFactory cacheLoadOptionsFactory;
 
     @Autowired
     private ProjectCacheKeys projectCacheKeys;
@@ -66,7 +68,7 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     public AjaxJson queryPlanningReviewForms(PlanningReviewFormQueryDTO queryDTO) {
         PlanningReviewFormQueryDTO normalized = queryDTO == null ? new PlanningReviewFormQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryPlanningReviewForms(normalized);
-        PlanningReviewFormQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        PlanningReviewFormQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> queryPlanningReviewFormsInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -75,7 +77,7 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     public AjaxJson queryPlanningReviewRows(PlanningReviewRowQueryDTO queryDTO) {
         PlanningReviewRowQueryDTO normalized = queryDTO == null ? new PlanningReviewRowQueryDTO() : queryDTO;
         String key = projectCacheKeys.queryPlanningReviewRows(normalized);
-        PlanningReviewRowQueryResultDTO result = cacheOpsService.getOrLoad(key, queryOptions(),
+        PlanningReviewRowQueryResultDTO result = cacheOpsService.getOrLoad(key, cacheLoadOptionsFactory.queryOptions(),
                 () -> queryPlanningReviewRowsInternal(normalized));
         return AjaxJson.getSuccessData(result);
     }
@@ -97,10 +99,12 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
             return AjaxJson.getError("规划复核表不属于当前项目");
         }
         String cacheKey = projectCacheKeys.planningReviewRowsByProjectAndForm(projectId, formId);
-        List<PlanningReviewRow> rows = cacheOpsService.getOrLoad(cacheKey, byRelationOptions(), () -> {
-            Query q = new Query(Criteria.where("project_id").is(projectId).and("planning_review_form_id").is(formId));
-            return mongoTemplate.find(q, PlanningReviewRow.class);
-        });
+        List<PlanningReviewRow> rows = cacheOpsService.getOrLoad(cacheKey, cacheLoadOptionsFactory.byRelationOptions(),
+                () -> {
+                    Query q = new Query(
+                            Criteria.where("project_id").is(projectId).and("planning_review_form_id").is(formId));
+                    return mongoTemplate.find(q, PlanningReviewRow.class);
+                });
         return AjaxJson.getSuccessData(rows);
     }
 
@@ -108,7 +112,7 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     @AuditOperation(operation = OperationType.UPDATE, targetType = TargetType.PLANNING_REVIEW_FORM, idParam = "p0.id")
     public AjaxJson updatePlanningReviewForm(PlanningReviewFormUpdateDTO updateDTO) {
         try {
-        Objects.requireNonNull(updateDTO, "updateDTO不能为空");
+            Objects.requireNonNull(updateDTO, "updateDTO不能为空");
             Query query = new Query(Criteria.where("_id").is(updateDTO.getId()));
             PlanningReviewForm existing = mongoTemplate.findOne(query, PlanningReviewForm.class);
             if (existing == null) {
@@ -121,7 +125,8 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
             evictAfterWrite(directKeys);
             return AjaxJson.getSuccess("规划复核表主表更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("更新规划复核表主表失败: " + e.getMessage());
+            log.error("更新规划复核表主表失败", e);
+            return AjaxJson.getError("更新规划复核表主表失败");
         }
     }
 
@@ -129,7 +134,7 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     @AuditOperation(operation = OperationType.CREATE, targetType = TargetType.PLANNING_REVIEW_ROW)
     public AjaxJson createPlanningReviewRow(PlanningReviewRowCreateDTO createDTO) {
         try {
-        Objects.requireNonNull(createDTO, "createDTO不能为空");
+            Objects.requireNonNull(createDTO, "createDTO不能为空");
             AjaxJson vr = validateProject(createDTO.getProjectId());
             if (vr != null) {
                 return vr;
@@ -150,9 +155,10 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
             if (!createDTO.getFileRecordId().equals(form.getFileRecordId())) {
                 return AjaxJson.getError("文件记录与主表不一致");
             }
-            Set<String> directKeys = planningReviewDirectKeys(createDTO.getProjectId(), createDTO.getPlanningReviewFormId());
+            Set<String> directKeys = planningReviewDirectKeys(createDTO.getProjectId(),
+                    createDTO.getPlanningReviewFormId());
             evictBeforeWrite(directKeys);
-                    
+
             PlanningReviewRow row = new PlanningReviewRow();
             BeanUtils.copyProperties(createDTO, row);
             row.preSave();
@@ -160,7 +166,8 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
             evictAfterWrite(directKeys);
             return AjaxJson.getSuccess("规划复核表行创建成功", saved);
         } catch (Exception e) {
-            return AjaxJson.getError("创建规划复核表行失败: " + e.getMessage());
+            log.error("创建规划复核表行失败", e);
+            return AjaxJson.getError("创建规划复核表行失败");
         }
     }
 
@@ -168,21 +175,23 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     @AuditOperation(operation = OperationType.UPDATE, targetType = TargetType.PLANNING_REVIEW_ROW, idParam = "p0.id")
     public AjaxJson updatePlanningReviewRow(PlanningReviewRowUpdateDTO updateDTO) {
         try {
-        Objects.requireNonNull(updateDTO, "updateDTO不能为空");
+            Objects.requireNonNull(updateDTO, "updateDTO不能为空");
             Query query = new Query(Criteria.where("_id").is(updateDTO.getId()));
             PlanningReviewRow existing = mongoTemplate.findOne(query, PlanningReviewRow.class);
             if (existing == null) {
                 return AjaxJson.getError("规划复核表行不存在");
             }
             Update update = DynamicUpdateHelper.buildDynamicUpdate(updateDTO);
-            Set<String> directKeys = planningReviewDirectKeys(existing.getProjectId(), existing.getPlanningReviewFormId());
+            Set<String> directKeys = planningReviewDirectKeys(existing.getProjectId(),
+                    existing.getPlanningReviewFormId());
             evictBeforeWrite(directKeys);
-                    
+
             mongoTemplate.updateFirst(query, update, PlanningReviewRow.class);
             evictAfterWrite(directKeys);
             return AjaxJson.getSuccess("规划复核表行更新成功");
         } catch (Exception e) {
-            return AjaxJson.getError("更新规划复核表行失败: " + e.getMessage());
+            log.error("更新规划复核表行失败", e);
+            return AjaxJson.getError("更新规划复核表行失败");
         }
     }
 
@@ -195,14 +204,16 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
             if (existing == null) {
                 return AjaxJson.getError("规划复核表行不存在");
             }
-            Set<String> directKeys = planningReviewDirectKeys(existing.getProjectId(), existing.getPlanningReviewFormId());
+            Set<String> directKeys = planningReviewDirectKeys(existing.getProjectId(),
+                    existing.getPlanningReviewFormId());
             evictBeforeWrite(directKeys);
-                    
+
             mongoTemplate.remove(query, PlanningReviewRow.class);
             evictAfterWrite(directKeys);
             return AjaxJson.getSuccess("规划复核表行删除成功");
         } catch (Exception e) {
-            return AjaxJson.getError("删除规划复核表行失败: " + e.getMessage());
+            log.error("删除规划复核表行失败", e);
+            return AjaxJson.getError("删除规划复核表行失败");
         }
     }
 
@@ -291,25 +302,5 @@ public class PlanningReviewAndRowServiceImpl implements PlanningReviewAndRowServ
     private void evictAfterWrite(Set<String> directKeys) {
         cacheInvalidationService.evictTwice(directKeys, DOUBLE_DELETE_DELAY_MS);
         cacheInvalidationService.evictByPatternTwice(Set.of(projectCacheKeys.queryPattern()), DOUBLE_DELETE_DELAY_MS);
-    }
-
-    private CacheLoadOptions byRelationOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getByRelation())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
-    }
-
-    private CacheLoadOptions queryOptions() {
-        return CacheLoadOptions.builder()
-                .ttlSeconds(cacheProperties.getTtl().getProject().getQuery())
-                .useLock(true)
-                .cacheNullValue(false)
-                .lockWaitMs(cacheProperties.getLock().getWaitMs())
-                .lockLeaseMs(cacheProperties.getLock().getLeaseMs())
-                .build();
     }
 }

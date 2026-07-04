@@ -108,9 +108,12 @@ public class FileController {
     }
 
     @GetMapping("/download/gridfs/{gridFsId}")
-    @Operation(summary = "根据GridFS ID下载文件", description = "通过GridFS文件ID直接从fs.files集合下载文件")
+    @Operation(summary = "根据GridFS ID下载文件", description = "仅允许下载已登记在 FileRecord 上的主文件或缩略图 GridFS")
     public ResponseEntity<Object> downloadFileByGridFsId(
             @Parameter(description = "GridFS文件id") @PathVariable String gridFsId) throws IOException {
+        if (!fileService.isRegisteredGridFsId(gridFsId)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(MessageConstant.FILE_NOT_FOUND);
+        }
         try {
             // 将字符串ID转为MongoDB的ObjectId
             ObjectId objectId = new ObjectId(gridFsId);
@@ -144,7 +147,7 @@ public class FileController {
                     .body(fileContent);
 
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("文件下载失败: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("文件下载失败");
         }
     }
 
@@ -159,7 +162,7 @@ public class FileController {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, MessageConstant.FILE_NOT_FOUND);
             }
         } catch (Exception e) {
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取文件信息失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取文件信息失败");
         }
     }
 
@@ -187,7 +190,7 @@ public class FileController {
             files.forEach(file -> file.setFileContent(null));
             return AjaxJson.getSuccess("获取项目文件列表成功").setData(files);
         } catch (Exception e) {
-            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取项目文件列表失败: " + e.getMessage());
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "获取项目文件列表失败");
         }
     }
 
@@ -217,7 +220,7 @@ public class FileController {
             TaskStatusDTO taskStatus = taskExecuteService.getTaskStatus();
             return AjaxJson.getSuccess("获取任务状态成功").setData(taskStatus);
         } catch (Exception e) {
-            return AjaxJson.get(500, "获取任务状态失败: " + e.getMessage());
+            return AjaxJson.get(500, "获取任务状态失败");
         }
     }
 
@@ -232,13 +235,14 @@ public class FileController {
             }
             return AjaxJson.getSuccess("获取任务详情成功").setData(detail);
         } catch (IllegalArgumentException e) {
-            return AjaxJson.get(400, e.getMessage());
+            throw e;
         } catch (Exception e) {
-            return AjaxJson.get(500, "获取任务详情失败: " + e.getMessage());
+            return AjaxJson.get(500, "获取任务详情失败");
         }
     }
 
     @GetMapping("/parse-job/{parseJobId}/flow")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "解析任务流水线视图", description = "基于 Mongo 中 parse_job 的阶段字段，任务结束后仍可查看各阶段状态与耗时")
     public AjaxJson getParseJobFlow(@Parameter(description = "parse_job.id") @PathVariable Long parseJobId) {
         try {
@@ -248,9 +252,9 @@ public class FileController {
             }
             return AjaxJson.getSuccess("获取解析流水线成功").setData(detail);
         } catch (IllegalArgumentException e) {
-            return AjaxJson.get(400, e.getMessage());
+            throw e;
         } catch (Exception e) {
-            return AjaxJson.get(500, "获取解析流水线失败: " + e.getMessage());
+            return AjaxJson.get(500, "获取解析流水线失败");
         }
     }
 
@@ -267,7 +271,7 @@ public class FileController {
             }
             return AjaxJson.get(400, "任务取消失败，任务可能已结束或不存在");
         } catch (Exception e) {
-            return AjaxJson.get(500, "取消任务失败: " + e.getMessage());
+            return AjaxJson.get(500, "取消任务失败");
         }
     }
 
@@ -279,7 +283,7 @@ public class FileController {
             SystemRuntimeStatusDTO status = taskExecuteService.getSystemRuntimeStatus();
             return AjaxJson.getSuccess("获取系统运行状态成功").setData(status);
         } catch (Exception e) {
-            return AjaxJson.get(500, "获取系统运行状态失败: " + e.getMessage());
+            return AjaxJson.get(500, "获取系统运行状态失败");
         }
     }
 
@@ -291,9 +295,9 @@ public class FileController {
             taskExecuteService.updateTaskPoolSize(resizeDTO);
             return AjaxJson.getSuccess("线程池参数更新成功");
         } catch (IllegalArgumentException e) {
-            return AjaxJson.get(400, e.getMessage());
+            throw e;
         } catch (Exception e) {
-            return AjaxJson.get(500, "线程池参数更新失败: " + e.getMessage());
+            return AjaxJson.get(500, "线程池参数更新失败");
         }
     }
 }
