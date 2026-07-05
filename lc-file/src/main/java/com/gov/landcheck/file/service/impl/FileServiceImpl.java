@@ -199,6 +199,10 @@ public class FileServiceImpl implements FileService {
         if (fileRecord == null) {
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不存在");
         }
+        if (!FileOperationAuthorization.canMutateFile(fileRecord)) {
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
+                    FileOperationAuthorization.denyReasonForFileMutate());
+        }
         SubmitParseResult result = submitParseIfEligible(fileRecord);
         if (result.isSubmitted()) {
             Map<String, String> data = new HashMap<>();
