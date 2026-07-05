@@ -1,5 +1,7 @@
 package com.gov.landcheck.file.service.parse;
 
+import java.util.concurrent.RejectedExecutionException;
+
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -139,8 +141,30 @@ public class FileParseSubmissionService {
                 revertPendingParseReservation(fileRecordId, rollbackState);
             }
             return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE),
-                    "解析文件失败");
+                    resolveSubmitFailureMessage(e));
         }
+    }
+
+    private static String resolveSubmitFailureMessage(Exception e) {
+        if (containsCause(e, RejectedExecutionException.class)) {
+            return "解析任务线程池已满，请稍后再试";
+        }
+        String message = e.getMessage();
+        if (message != null && !message.isBlank()) {
+            return message;
+        }
+        return "解析文件失败";
+    }
+
+    private static boolean containsCause(Throwable throwable, Class<? extends Throwable> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void markUnparseableDueToFormatMismatch(FileRecord fileRecord) {

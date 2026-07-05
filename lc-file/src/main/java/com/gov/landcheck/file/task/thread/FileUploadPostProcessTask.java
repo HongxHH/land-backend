@@ -9,12 +9,12 @@ import org.springframework.data.mongodb.core.query.Update;
 
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.UploadRecord;
+import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.FileType;
 import com.gov.landcheck.core.enums.UploadStatusEnum;
-import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.service.UploadRecordService;
-import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
+import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
 import com.gov.landcheck.file.utils.GridFSUtils;
 import com.gov.landcheck.file.utils.PdfProcessor;
 import com.mongodb.client.result.UpdateResult;
@@ -22,7 +22,7 @@ import com.mongodb.client.result.UpdateResult;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 单文件上传后处理：缩略图、状态迁移、上传记录、延迟自动提交解析。
+ * 单文件上传后处理：缩略图、状态迁移、上传记录、自动提交解析到线程池。
  */
 @Slf4j
 public class FileUploadPostProcessTask implements Runnable {
@@ -36,14 +36,14 @@ public class FileUploadPostProcessTask implements Runnable {
     private final UploadRecordService uploadRecordService;
     private final PdfProcessor pdfProcessor;
     private final GridFSUtils gridFSUtils;
-    private final DeferredParseSubmissionService deferredParseSubmissionService;
+    private final AutoParseSubmissionService autoParseSubmissionService;
 
     private volatile boolean failureHandled;
 
     public FileUploadPostProcessTask(String taskId, String fileId, Long operatorId, String operatorName,
             MongoTemplate mongoTemplate, UploadRecordService uploadRecordService,
             PdfProcessor pdfProcessor, GridFSUtils gridFSUtils,
-            DeferredParseSubmissionService deferredParseSubmissionService) {
+            AutoParseSubmissionService autoParseSubmissionService) {
         this.taskId = taskId;
         this.fileId = fileId;
         this.operatorId = operatorId;
@@ -52,7 +52,7 @@ public class FileUploadPostProcessTask implements Runnable {
         this.uploadRecordService = uploadRecordService;
         this.pdfProcessor = pdfProcessor;
         this.gridFSUtils = gridFSUtils;
-        this.deferredParseSubmissionService = deferredParseSubmissionService;
+        this.autoParseSubmissionService = autoParseSubmissionService;
     }
 
     public String getTaskId() {
@@ -81,9 +81,9 @@ public class FileUploadPostProcessTask implements Runnable {
                     || !FileContextType.isAutoParseContext(fileRecord.getFileContextType())) {
                 return;
             }
-            deferredParseSubmissionService.enqueueAfterUpload(fileRecord.getId());
+            autoParseSubmissionService.submitAfterUpload(fileRecord.getId());
         } catch (Exception e) {
-            log.warn("上传后延迟自动解析入队失败: fileId={}, error={}", fileId, e.getMessage(), e);
+            log.warn("上传后自动解析提交失败: fileId={}, error={}", fileId, e.getMessage(), e);
         }
     }
 

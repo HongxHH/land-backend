@@ -33,9 +33,10 @@ import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.dto.TaskStatusDTO;
 import com.gov.landcheck.file.service.ITaskExecuteService;
+import com.gov.landcheck.file.service.ParseConcurrencyService;
 import com.gov.landcheck.file.service.ParseProgressAssembler;
 import com.gov.landcheck.file.service.UploadRecordService;
-import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
+import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
 import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
 import com.gov.landcheck.file.service.parse.ParseJobStageHelper;
 import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
@@ -81,13 +82,16 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
     private DataSource dataSource;
 
     @Autowired
-    private DeferredParseSubmissionService deferredParseSubmissionService;
+    private AutoParseSubmissionService autoParseSubmissionService;
 
     @Autowired
     private ParseProgressAssembler parseProgressAssembler;
 
     @Autowired
     private ParseArtifactCleanupService parseArtifactCleanupService;
+
+    @Autowired
+    private ParseConcurrencyService parseConcurrencyService;
 
     @Override
     public String executeParseTask(FileRecord fileRecord, FileStateEnum rollbackFileStateIfSubmitFails) {
@@ -193,7 +197,7 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
         FileUploadPostProcessTask task = new FileUploadPostProcessTask(
                 taskId, fileId, operatorId, operatorName,
                 mongoTemplate, uploadRecordService, pdfProcessor, gridFSUtils,
-                deferredParseSubmissionService);
+                autoParseSubmissionService);
         try {
             uploadThreadPool.submit(task);
         } catch (RejectedExecutionException e) {
@@ -258,7 +262,11 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
      */
     @Override
     public TaskStatusDTO getTaskStatus() {
-        return taskThreadPool.getTaskStatus();
+        TaskStatusDTO status = taskThreadPool.getTaskStatus();
+        if (status != null) {
+            parseConcurrencyService.enrichThreadPoolStatus(status.getThreadPoolStatus());
+        }
+        return status;
     }
 
     /**
@@ -340,14 +348,12 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
     }
 
     /**
-     * 更新线程池大小
+     * 更新解析并行度 N（线程池 core/max 与 parse-pipeline gate 联动）。
      */
     @Override
     public void updateTaskPoolSize(ThreadPoolResizeDTO resizeDTO) {
         Objects.requireNonNull(resizeDTO, "resizeDTO不能为空");
-        Integer corePoolSize = resizeDTO.getCorePoolSize();
-        Integer maximumPoolSize = resizeDTO.getMaximumPoolSize();
-        taskThreadPool.updatePoolSize(corePoolSize, maximumPoolSize);
+        parseConcurrencyService.updateConcurrency(resizeDTO.getParseConcurrency());
     }
 
     private double toPercent(double ratio) {

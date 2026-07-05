@@ -117,7 +117,8 @@ public enum FileContextType {
     }
 
     /**
-     * 上传后自动进入延迟解析队列的内容类型（与 DeferredParseSubmissionService 对齐）。
+     * 上传后自动提交解析的内容类型（与
+     * {@link com.gov.landcheck.file.service.parse.AutoParseSubmissionService} 对齐）。
      */
     public boolean isAutoParseContext() {
         return this == CONTRACT

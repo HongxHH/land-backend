@@ -18,7 +18,7 @@ import com.gov.landcheck.file.config.FileProcessingProperties;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 应用重启后恢复 WAITING_PARSE 文件的自动解析入队（在 ParseJobStateRecovery 之后执行）。
+ * 应用重启后恢复 WAITING_PARSE 文件的自动解析（在 ParseJobStateRecovery 之后执行）。
  */
 @Slf4j
 @Component
@@ -26,15 +26,15 @@ import lombok.extern.slf4j.Slf4j;
 public class AutoParseStartupRecovery implements ApplicationRunner {
 
     private final MongoTemplate mongoTemplate;
-    private final DeferredParseSubmissionService deferredParseSubmissionService;
+    private final AutoParseSubmissionService autoParseSubmissionService;
     private final FileProcessingProperties properties;
 
     public AutoParseStartupRecovery(
             MongoTemplate mongoTemplate,
-            DeferredParseSubmissionService deferredParseSubmissionService,
+            AutoParseSubmissionService autoParseSubmissionService,
             FileProcessingProperties properties) {
         this.mongoTemplate = mongoTemplate;
-        this.deferredParseSubmissionService = deferredParseSubmissionService;
+        this.autoParseSubmissionService = autoParseSubmissionService;
         this.properties = properties;
     }
 
@@ -46,7 +46,8 @@ public class AutoParseStartupRecovery implements ApplicationRunner {
         try {
             Query query = new Query(Criteria.where("file_state").is(FileStateEnum.WAITING_PARSE));
             List<FileRecord> waitingFiles = mongoTemplate.find(query, FileRecord.class);
-            int enqueued = 0;
+            int attempted = 0;
+            int submitted = 0;
             for (FileRecord fileRecord : waitingFiles) {
                 if (fileRecord.getId() == null) {
                     continue;
@@ -54,11 +55,13 @@ public class AutoParseStartupRecovery implements ApplicationRunner {
                 if (!FileContextType.isAutoParseContext(fileRecord.getFileContextType())) {
                     continue;
                 }
-                deferredParseSubmissionService.enqueueAfterUpload(fileRecord.getId());
-                enqueued++;
+                attempted++;
+                if (autoParseSubmissionService.submitWaitingFile(fileRecord)) {
+                    submitted++;
+                }
             }
-            if (enqueued > 0) {
-                log.info("启动恢复：已将 {} 个 WAITING_PARSE 文件加入自动解析队列", enqueued);
+            if (attempted > 0) {
+                log.info("启动恢复：尝试 {} 个 WAITING_PARSE 文件，成功提交 {} 个到解析线程池", attempted, submitted);
             }
         } catch (Exception e) {
             log.error("启动自动解析恢复失败: {}", e.getMessage(), e);

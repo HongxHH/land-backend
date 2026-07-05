@@ -289,15 +289,15 @@ public class FileController {
 
     @PostMapping("/task/pool-size")
     @SaCheckRole(value = UserTypeConstants.DEVELOPER)
-    @Operation(summary = "动态调整任务线程池参数", description = "在线调整核心线程数与最大线程数")
+    @Operation(summary = "动态调整解析并行度", description = "设置并行解析路数 N，同步更新线程池 core/max 与 parse-pipeline gate")
     public AjaxJson updateTaskPoolSize(@Valid @RequestBody ThreadPoolResizeDTO resizeDTO) {
         try {
             taskExecuteService.updateTaskPoolSize(resizeDTO);
-            return AjaxJson.getSuccess("线程池参数更新成功");
-        } catch (IllegalArgumentException e) {
-            throw e;
+            return AjaxJson.getSuccess("解析并行度更新成功");
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, e.getMessage());
         } catch (Exception e) {
-            return AjaxJson.get(500, "线程池参数更新失败");
+            return AjaxJson.get(500, "解析并行度更新失败");
         }
     }
 }

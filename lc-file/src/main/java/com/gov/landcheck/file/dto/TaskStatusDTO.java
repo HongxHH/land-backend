@@ -85,6 +85,26 @@ public class TaskStatusDTO {
          * 线程池是否已终止
          */
         private boolean isTerminated;
+
+        /**
+         * 解析并行度 N（core=max=gate 许可数）
+         */
+        private int parseConcurrency;
+
+        /**
+         * 动态调参硬上限
+         */
+        private int parseConcurrencyHardLimit;
+
+        /**
+         * 当前占用 parse-pipeline gate 的路数
+         */
+        private int pipelineActivePermits;
+
+        /**
+         * 当前可用 parse-pipeline gate 许可数
+         */
+        private int pipelineAvailablePermits;
     }
 
     /**

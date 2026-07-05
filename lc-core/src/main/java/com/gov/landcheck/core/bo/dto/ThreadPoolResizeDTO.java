@@ -6,16 +6,12 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
-@Schema(description = "线程池动态调参请求")
+@Schema(description = "解析并行度调参请求（线程池 core/max 与 parse-pipeline gate 联动）")
 public class ThreadPoolResizeDTO {
 
     @NotNull
     @Min(1)
-    @Schema(description = "核心线程数", requiredMode = Schema.RequiredMode.REQUIRED, example = "6")
-    private Integer corePoolSize;
-
-    @NotNull
-    @Min(1)
-    @Schema(description = "最大线程数", requiredMode = Schema.RequiredMode.REQUIRED, example = "8")
-    private Integer maximumPoolSize;
+    @Schema(description = "并行解析路数 N（同时等于线程池 core/max 与管道 gate 许可数）",
+            requiredMode = Schema.RequiredMode.REQUIRED, example = "2")
+    private Integer parseConcurrency;
 }

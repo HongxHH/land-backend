@@ -26,8 +26,8 @@ import com.gov.landcheck.file.dto.TaskStatusDTO;
 import com.gov.landcheck.file.task.base.PrioritizedFutureTask;
 import com.gov.landcheck.file.task.base.Task;
 import com.gov.landcheck.file.task.base.TaskData;
-import com.gov.landcheck.file.task.base.TaskStageTrace;
 import com.gov.landcheck.file.task.base.TaskPriority;
+import com.gov.landcheck.file.task.base.TaskStageTrace;
 import com.gov.landcheck.file.task.executor.PriorityThreadPoolExecutor;
 import com.gov.landcheck.file.task.publisher.TaskResultPublisher;
 
@@ -69,8 +69,8 @@ public class TaskThreadPool {
         FileProcessingProperties.Pool pool = fileProcessingProperties != null
                 ? fileProcessingProperties.getParsePool()
                 : null;
-        int corePoolSize = pool != null ? pool.getCoreSize() : 6;
-        int maximumPoolSize = pool != null ? pool.getMaxSize() : 8;
+        int corePoolSize = pool != null ? pool.getCoreSize() : 2;
+        int maximumPoolSize = pool != null ? pool.getMaxSize() : 2;
         this.queueCapacity = pool != null ? pool.getQueueCapacity() : TASK_QUEUE_CAPACITY_FALLBACK;
 
         ThreadFactory threadFactory = new ThreadFactoryBuilder()
@@ -228,6 +228,23 @@ public class TaskThreadPool {
             taskFutures.remove(taskId);
             activeTasks.remove(taskId);
         }
+    }
+
+    /**
+     * 解析线程池是否还能接受新任务（队列未满且未关闭）。
+     */
+    public boolean hasSubmissionCapacity() {
+        if (priorityExecutor == null || priorityExecutor.isShutdown()) {
+            return false;
+        }
+        return priorityExecutor.getQueue().remainingCapacity() > 0;
+    }
+
+    /**
+     * 动态调整解析并行度（core 与 max 设为同一值）。
+     */
+    public synchronized void updateConcurrency(int concurrency) {
+        updatePoolSize(concurrency, concurrency);
     }
 
     /**
@@ -463,5 +480,9 @@ public class TaskThreadPool {
 
     public int getQueueCapacity() {
         return queueCapacity;
+    }
+
+    public int getMaximumPoolSize() {
+        return priorityExecutor.getMaximumPoolSize();
     }
 }

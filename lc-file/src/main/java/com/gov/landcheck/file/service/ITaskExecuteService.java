@@ -105,9 +105,9 @@ public interface ITaskExecuteService {
     SystemRuntimeStatusDTO getSystemRuntimeStatus();
 
     /**
-     * 动态调整任务线程池参数
-     * 
-     * @param resizeDTO 核心线程数与最大线程数
+     * 动态调整解析并行度 N（线程池 core/max 与 parse-pipeline gate 联动）
+     *
+     * @param resizeDTO 并行解析路数
      */
     void updateTaskPoolSize(ThreadPoolResizeDTO resizeDTO);
 }

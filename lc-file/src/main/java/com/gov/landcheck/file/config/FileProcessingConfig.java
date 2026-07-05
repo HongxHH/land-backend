@@ -15,7 +15,7 @@ public class FileProcessingConfig {
 
     @Bean(name = PARSE_PIPELINE_GATE)
     public ProcessingConcurrencyGate parsePipelineConcurrencyGate(FileProcessingProperties properties) {
-        int max = properties.getConcurrency().getMaxActiveParsePipelines();
+        int max = properties.getParsePool().getMaxSize();
         return new ProcessingConcurrencyGate("parse-pipeline", max, properties.getGateAcquireTimeoutMs());
     }
 

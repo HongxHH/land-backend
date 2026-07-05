@@ -62,6 +62,7 @@ logging:
     root: INFO
     com.gov.landcheck: DEBUG
     org.apache.pdfbox: ERROR
+    org.apache.fontbox: ERROR
 
 landcheck:
   security:
@@ -116,17 +117,16 @@ landcheck:
         queue-capacity: 0
       parse-pool:
         core-size: 2
-        max-size: 3
+        max-size: 2
         queue-capacity: 512
       thumbnail-dpi: 120
       gate-acquire-timeout-ms: 30000
       auto-parse:
         enabled: true
-        defer-ms: 5000
-        max-pending: 2000
-        retry-delay-ms: 5000
+        retry-interval-ms: 5000
+        retry-batch-size: 16
       concurrency:
-        max-active-parse-pipelines: 2
+        max-parse-concurrency-limit: 16
         max-python-preprocess: 1
   ocr:
     api:

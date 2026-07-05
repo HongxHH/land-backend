@@ -89,7 +89,7 @@ public class FileRecord extends MongoIdEntity {
     private String parseMessage;
 
     @Field(name = "auto_parse_queued_at")
-    @Schema(description = "已进入延迟自动解析队列的时间；仅 WAITING_PARSE 阶段有意义")
+    @Schema(description = "遗留字段：历史延迟自动解析队列入队时间，新流程不再写入")
     private LocalDateTime autoParseQueuedAt;
 
     @Field(name = "phase")

@@ -75,7 +75,7 @@ import com.gov.landcheck.file.dto.FileQueryResultDTO;
 import com.gov.landcheck.file.dto.SubmitParseResult;
 import com.gov.landcheck.file.service.FileService;
 import com.gov.landcheck.core.utils.UploadFileNameSanitizer;
-import com.gov.landcheck.file.service.parse.DeferredParseSubmissionService;
+import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
 import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.UploadRecordService;
@@ -116,7 +116,7 @@ public class FileServiceImpl implements FileService {
     private FileParseSubmissionService fileParseSubmissionService;
     @Lazy
     @Resource
-    private DeferredParseSubmissionService deferredParseSubmissionService;
+    private AutoParseSubmissionService autoParseSubmissionService;
     @Resource
     private SurveyReportContractApprovalSyncService surveyReportContractApprovalSyncService;
 
@@ -344,9 +344,9 @@ public class FileServiceImpl implements FileService {
             return;
         }
         try {
-            deferredParseSubmissionService.enqueueAfterUpload(fileRecord.getId());
+            autoParseSubmissionService.submitAfterUpload(fileRecord.getId());
         } catch (Exception ex) {
-            log.warn("取消解析后重新入队自动解析失败: fileId={}, error={}", fileRecord.getId(), ex.getMessage());
+            log.warn("取消解析后重新提交自动解析失败: fileId={}, error={}", fileRecord.getId(), ex.getMessage());
         }
     }
 
