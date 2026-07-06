@@ -63,6 +63,8 @@ logging:
     com.gov.landcheck: DEBUG
     org.apache.pdfbox: ERROR
     org.apache.fontbox: ERROR
+  file:
+    path: ${LANDCHECK_LOG_DIR:./logs}
 
 landcheck:
   security:

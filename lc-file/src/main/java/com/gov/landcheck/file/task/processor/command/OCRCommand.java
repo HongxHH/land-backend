@@ -56,14 +56,15 @@ public class OCRCommand extends AbstractCommand {
 
     @Override
     protected void doExecute(TaskData taskData) throws TaskException {
-        log.info("开始OCR识别: fileId={}", taskData.getFileRecord().getId());
+        Long fileId = taskData.getFileRecord().getId();
+        long startedAt = System.currentTimeMillis();
+        log.info("externalCall=ocr action=start fileId={}", fileId);
 
         parseJobUpdateService.updateOcrStarted(taskData.getParseJob());
 
         FileRecord fileRecord = taskData.getFileRecord();
 
         try {
-            // 使用预处理后的文件，如果没有则使用原始文件
             String targetGridfsId = StringUtils.hasText(taskData.getPreprocessGridfsId())
                     ? taskData.getPreprocessGridfsId()
                     : fileRecord.getGridfsId();
@@ -74,20 +75,22 @@ public class OCRCommand extends AbstractCommand {
                     .select(fileRecord.getFileContextType())
                     .process(taskData);
 
-            // 保存OCR结果到数据库和GridFS
             saveOCRResult(ocrResult, fileRecord.getId(), taskData.getParseJob().getId());
 
-            // 更新任务数据
             taskData.setOcrProcessResult(ocrResult);
 
             parseJobUpdateService.updateOcrCompleted(taskData.getParseJob(), "OCR结果已保存");
 
             int pageCount = ocrResult.getPageResults() == null ? 0 : ocrResult.getPageResults().size();
-            log.info("OCR识别完成: fileId={}, pages={}",
-                    fileRecord.getId(), pageCount);
+            long durationMs = System.currentTimeMillis() - startedAt;
+            log.info("externalCall=ocr action=complete fileId={} durationMs={} outcome=success pages={}",
+                    fileId, durationMs, pageCount);
 
         } catch (Exception e) {
+            long durationMs = System.currentTimeMillis() - startedAt;
             TaskException.ErrorCode errorCode = determineOcrErrorCode(e);
+            log.info("externalCall=ocr action=complete fileId={} durationMs={} outcome=error errorType={}",
+                    fileId, durationMs, errorCode);
             parseJobUpdateService.updateOcrFailed(taskData.getParseJob(), e.getMessage());
             throw new TaskException(
                     errorCode,

@@ -2,12 +2,16 @@ package com.gov.landcheck.file.task.processor.command;
 
 import org.springframework.stereotype.Component;
 
+import com.gov.landcheck.core.bo.entity.ProjectPartyDeclaredTotals;
+import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
+import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
 import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
 import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
+import com.gov.landcheck.file.task.base.TaskFailureClassifier;
 import com.gov.landcheck.file.task.processor.receiver.DataFillReceiver;
 
 import jakarta.annotation.Resource;
@@ -34,6 +38,17 @@ public class FillCommand extends AbstractCommand {
     }
 
     @Override
+    public boolean canSkip(TaskData taskData) {
+        if (!shouldSkipProjectPartyFillWithoutTotals(taskData)) {
+            return false;
+        }
+        log.info("项目方汇总无可用汇总数据，跳过回填: fileId={}, remark={}",
+                taskData.getFileRecord().getId(),
+                taskData.getProjectPartySummaryForm().getRemark());
+        return true;
+    }
+
+    @Override
     protected void doExecute(TaskData taskData) throws TaskException {
         log.debug("开始数据回填: fileId={}", taskData.getFileRecord().getId());
 
@@ -47,7 +62,7 @@ public class FillCommand extends AbstractCommand {
             log.debug("数据回填完成: fileId={}", taskData.getFileRecord().getId());
 
         } catch (Exception e) {
-            TaskException.ErrorCode errorCode = determineFillErrorCode(e);
+            TaskException.ErrorCode errorCode = TaskFailureClassifier.classifyFillFailure(e);
             parseJobUpdateService.updateFillFailed(taskData.getParseJob(), e.getMessage());
 
             throw new TaskException(
@@ -71,18 +86,21 @@ public class FillCommand extends AbstractCommand {
         return summary;
     }
 
-    private TaskException.ErrorCode determineFillErrorCode(Exception exception) {
-        String message = exception.getMessage();
-        if (message == null) {
-            message = "";
+    /**
+     * 解析器已判定为 PARTIAL 且无汇总数值时，跳过回填（与「无汇总则输出空、不编造」策略一致）。
+     */
+    static boolean shouldSkipProjectPartyFillWithoutTotals(TaskData taskData) {
+        if (taskData == null || taskData.getFileRecord() == null) {
+            return false;
         }
-        String lowerMessage = message.toLowerCase();
-        if (exception instanceof TaskException taskException) {
-            return taskException.getErrorCode();
+        if (taskData.getFileRecord().getFileContextType() != FileContextType.PROJECT_PARTY_SURVEY_SUMMARY) {
+            return false;
         }
-        if (lowerMessage.contains("timeout") || lowerMessage.contains("time out")) {
-            return TaskException.ErrorCode.FILL_TIMEOUT;
+        ProjectPartySurveySummaryForm form = taskData.getProjectPartySummaryForm();
+        if (form == null || !"PARTIAL".equals(form.getParseStatus())) {
+            return false;
         }
-        return TaskException.ErrorCode.FILL_FAILED;
+        ProjectPartyDeclaredTotals totals = form.getDeclaredTotals();
+        return totals == null || !totals.hasAnyDeclaredField();
     }
 }

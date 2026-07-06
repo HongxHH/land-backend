@@ -11,8 +11,9 @@ import org.springframework.stereotype.Service;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.config.global.RetryConfig;
+import com.gov.landcheck.core.config.logging.ContextPropagating;
 import com.gov.landcheck.file.config.FileRetrySchedulerConfig;
-import com.gov.landcheck.file.task.base.TaskException;
+import com.gov.landcheck.file.task.base.TaskFailureClassifier;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -46,125 +47,44 @@ public class RetryDecisionService {
      */
     public RetryDecision shouldRetry(ParseJob parseJob, Exception exception) {
         if (parseJob == null) {
+            logNoRetryDecision(null, "parseJob为空");
             return RetryDecision.noRetry("parseJob为空");
         }
         if (parseJob.isCancelRequested()) {
+            logNoRetryDecision(parseJob, "任务已取消");
             return RetryDecision.noRetry("任务已取消");
         }
         if (exception == null) {
+            logNoRetryDecision(parseJob, "exception为空");
             return RetryDecision.noRetry("exception为空");
         }
         int currentAttempts = parseJob.getAttemptCount() != null ? parseJob.getAttemptCount() : 0;
 
-        // 检查重试次数限制
         if (currentAttempts >= retryConfig.getMaxAttempts()) {
+            logNoRetryDecision(parseJob, "超过最大重试次数: " + currentAttempts);
             return RetryDecision.noRetry("超过最大重试次数: " + currentAttempts);
         }
 
-        // 分析异常类型
-        String errorType = analyzeErrorType(exception);
+        String errorType = TaskFailureClassifier.toRetryErrorType(exception);
         if (!retryConfig.isRetryable(errorType)) {
+            logNoRetryDecision(parseJob, "错误类型不支持重试: " + errorType);
             return RetryDecision.noRetry("错误类型不支持重试: " + errorType);
         }
 
-        // 计算下次重试延迟（至少 1 秒，避免与 fallback 清理并发竞态）
         long delayMs = Math.max(1000L, retryConfig.calculateDelay(currentAttempts + 1));
-
-        return RetryDecision.retry(delayMs, "错误类型: " + errorType + ", 延迟: " + delayMs + "ms");
+        RetryDecision decision = RetryDecision.retry(delayMs, "错误类型: " + errorType + ", 延迟: " + delayMs + "ms");
+        log.info("重试决策: decision=retry fileId={} parseJobId={} attempt={}/{} errorType={} delayMs={} reason={}",
+                parseJob.getFileRecordId(), parseJob.getId(), currentAttempts, retryConfig.getMaxAttempts(),
+                errorType, delayMs, decision.getReason());
+        return decision;
     }
 
-    /**
-     * 分析异常类型
-     */
-    private String analyzeErrorType(Exception exception) {
-        String message = exception.getMessage();
-        if (message == null)
-            message = exception.getClass().getSimpleName();
-
-        String lowerMessage = message.toLowerCase();
-
-        // 超时相关
-        if (lowerMessage.contains("timeout") || lowerMessage.contains("time out")) {
-            return "timeout";
-        }
-
-        // 连接相关
-        if (lowerMessage.contains("connection") || lowerMessage.contains("connect")) {
-            return "connection";
-        }
-
-        // 网络相关
-        if (lowerMessage.contains("network") || lowerMessage.contains("socket")) {
-            return "network";
-        }
-
-        // 数据库相关
-        if (lowerMessage.contains("database") || lowerMessage.contains("mongo")) {
-            return "database";
-        }
-
-        // 任务异常
-        if (exception instanceof TaskException taskException) {
-            TaskException.ErrorCode errorCode = taskException.getErrorCode();
-            switch (errorCode) {
-                // 预处理阶段错误（仅超时/资源类可重试）
-                case PREPROCESS_TIMEOUT:
-                case PREPROCESS_RESOURCE_ERROR:
-                    return "timeout";
-                case PREPROCESS_FAILED:
-                    return "parse";
-
-                // OCR阶段错误
-                case OCR_TIMEOUT:
-                case OCR_API_ERROR:
-                    return "network";
-                case OCR_FAILED:
-                    return "unknown";
-                case OCR_INVALID_INPUT:
-                    return "parse"; // 输入数据问题，不可重试
-
-                // 数据解析阶段错误（业务/数据问题不可重试，仅超时重试）
-                case PARSE_TIMEOUT:
-                    return "timeout";
-                case PARSE_FAILED:
-                case PARSE_DATA_INVALID:
-                    return "parse";
-
-                // 数据回填阶段错误
-                case FILL_FAILED:
-                case FILL_TIMEOUT:
-                    return "database"; // 数据库操作相关
-
-                // 数据校验阶段错误
-                case VALIDATE_FAILED:
-                case VALIDATE_TIMEOUT:
-                    return "database"; // 涉及数据库查询
-
-                // 系统级别错误
-                case DATABASE_ERROR:
-                    return "database";
-                case NETWORK_ERROR:
-                    return "network";
-                case IO_ERROR:
-                    return "io"; // IO错误有时是临时性的
-
-                // 任务管理错误
-                case TASK_TIMEOUT:
-                    return "timeout";
-                case TASK_RESOURCE_ERROR:
-                    return "timeout"; // 资源不足通常是临时性的
-
-                // 不支持重试的错误
-                case TASK_CANCELLED:
-                case TASK_STATE_INVALID:
-                case SYSTEM_ERROR:
-                default:
-                    return "unknown";
-            }
-        }
-
-        // 默认不可重试
-        return "unknown";
+    private void logNoRetryDecision(ParseJob parseJob, String reason) {
+        int currentAttempts = parseJob != null && parseJob.getAttemptCount() != null ? parseJob.getAttemptCount() : 0;
+        log.info("重试决策: decision=noRetry fileId={} parseJobId={} attempt={}/{} reason={}",
+                parseJob != null ? parseJob.getFileRecordId() : null,
+                parseJob != null ? parseJob.getId() : null,
+                currentAttempts, retryConfig.getMaxAttempts(), reason);
     }
 
     /**
@@ -237,28 +157,29 @@ public class RetryDecisionService {
     private void executeRetryWithDelay(ParseJob existingParseJob, FileRecord fileRecord, long delayMs,
             int attemptCount) {
         try {
-            parseRetryScheduler.schedule(() -> {
-                try {
-                    ParseJob latest = mongoTemplate.findById(existingParseJob.getId(), ParseJob.class);
-                    if (latest == null || latest.isCancelRequested()) {
-                        log.info("延迟重试已跳过（任务已取消）: fileId={}, parseJobId={}",
-                                fileRecord.getId(), existingParseJob.getId());
-                        return;
-                    }
-                    log.debug("延迟重试执行: fileId={}, parseJobId={}, delay={}ms",
-                            fileRecord.getId(), existingParseJob.getId(), delayMs);
-                    String newTaskId = taskExecuteService.retryParseTask(existingParseJob, fileRecord);
-                    existingParseJob.setRetryStatus("SUBMITTED");
-                    existingParseJob.setNextRetryAt(null);
-                    mongoTemplate.save(existingParseJob);
-                    log.info("延迟重试任务已提交: fileId={}, parseJobId={}, newTaskId={}, attempt={}",
-                            fileRecord.getId(), existingParseJob.getId(), newTaskId, attemptCount);
-                } catch (Exception e) {
-                    log.error("延迟重试任务提交失败: fileId={}, parseJobId={}, attempt={}, error={}",
-                            fileRecord.getId(), existingParseJob.getId(), attemptCount, e.getMessage(), e);
-                    persistRetrySubmitFailure(existingParseJob, fileRecord, attemptCount, "delayed", e);
-                }
-            }, delayMs, TimeUnit.MILLISECONDS);
+            parseRetryScheduler
+                    .schedule(() -> ContextPropagating.runWithTraceId(existingParseJob.getRequestId(), () -> {
+                        try {
+                            ParseJob latest = mongoTemplate.findById(existingParseJob.getId(), ParseJob.class);
+                            if (latest == null || latest.isCancelRequested()) {
+                                log.info("延迟重试已跳过（任务已取消）: fileId={}, parseJobId={}",
+                                        fileRecord.getId(), existingParseJob.getId());
+                                return;
+                            }
+                            log.debug("延迟重试执行: fileId={}, parseJobId={}, delay={}ms",
+                                    fileRecord.getId(), existingParseJob.getId(), delayMs);
+                            String newTaskId = taskExecuteService.retryParseTask(existingParseJob, fileRecord);
+                            existingParseJob.setRetryStatus("SUBMITTED");
+                            existingParseJob.setNextRetryAt(null);
+                            mongoTemplate.save(existingParseJob);
+                            log.info("延迟重试任务已提交: fileId={}, parseJobId={}, newTaskId={}, attempt={}",
+                                    fileRecord.getId(), existingParseJob.getId(), newTaskId, attemptCount);
+                        } catch (Exception e) {
+                            log.error("延迟重试任务提交失败: fileId={}, parseJobId={}, attempt={}, error={}",
+                                    fileRecord.getId(), existingParseJob.getId(), attemptCount, e.getMessage(), e);
+                            persistRetrySubmitFailure(existingParseJob, fileRecord, attemptCount, "delayed", e);
+                        }
+                    }), delayMs, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             log.error("延迟重试未能入调度队列: fileId={}, parseJobId={}, error={}",
                     fileRecord.getId(), existingParseJob.getId(), e.getMessage(), e);

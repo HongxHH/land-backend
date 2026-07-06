@@ -25,6 +25,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
 import com.gov.landcheck.core.audit.OperatorContext;
+import com.gov.landcheck.core.config.logging.TraceContext;
 import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
 import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 import com.gov.landcheck.core.bo.entity.FileRecord;
@@ -102,6 +103,7 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
             parseJob.setJobStatus(ParseJobStateEnum.PENDING);
             parseJob.setAttemptCount(0);
             parseJob.setCreatedBy(OperatorContext.getOperatorIdOrDefault(0L));
+            parseJob.setRequestId(TraceContext.getTraceId());
             parseJob.setFileContextType(fileRecord.getFileContextType());
             String taskId = UUID.randomUUID().toString();
             parseJob.setTaskId(taskId);

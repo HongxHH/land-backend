@@ -29,11 +29,13 @@ import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.common.UserTypeConstants;
 import com.gov.landcheck.core.enums.FileContextType;
+import com.gov.landcheck.file.dto.BulkParseEnqueueResultDTO;
 import com.gov.landcheck.file.dto.FileQueryDTO;
 import com.gov.landcheck.file.dto.FileUploadDTO;
 import com.gov.landcheck.file.dto.TaskStatusDTO;
 import com.gov.landcheck.file.service.FileService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
+import com.gov.landcheck.file.service.parse.GlobalParseEnqueueService;
 import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.model.GridFSFile;
 
@@ -56,6 +58,9 @@ public class FileController {
 
     @Resource
     private ITaskExecuteService taskExecuteService;
+
+    @Resource
+    private GlobalParseEnqueueService globalParseEnqueueService;
 
     @Resource
     private GridFSBucket gridFSBucket;
@@ -285,6 +290,39 @@ public class FileController {
         } catch (Exception e) {
             return AjaxJson.get(500, "获取系统运行状态失败");
         }
+    }
+
+    @PostMapping("/task/enqueue-pending-parse")
+    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
+    @Operation(summary = "全库待解析/失败文件入队", description = "将所有项目中 file_state 为 WAITING_PARSE 或 PARSE_FAIL 的可解析文件提交到解析线程池")
+    public AjaxJson enqueuePendingAndFailedParse() {
+        try {
+            BulkParseEnqueueResultDTO result = globalParseEnqueueService.enqueuePendingAndFailed();
+            String msg = buildBulkEnqueueMessage(result);
+            return AjaxJson.getSuccess(msg).setData(result);
+        } catch (Exception e) {
+            return AjaxJson.get(500, "批量入队解析失败");
+        }
+    }
+
+    private static String buildBulkEnqueueMessage(BulkParseEnqueueResultDTO result) {
+        if (result == null) {
+            return "批量入队完成";
+        }
+        if (result.isQueueFull() && result.getSubmitted() == 0) {
+            if (result.getRemainingEstimate() > 0) {
+                return String.format("解析线程池队列已满，约 %d 个文件仍待入队，请稍后再试", result.getRemainingEstimate());
+            }
+            return "解析线程池队列已满，请稍后再试";
+        }
+        if (result.getSubmitted() == 0 && result.getScanned() == 0) {
+            return "当前没有待解析或解析失败的文件";
+        }
+        String base = String.format("已提交 %d 个解析任务（跳过 %d 个）", result.getSubmitted(), result.getSkipped());
+        if (result.isQueueFull() && result.getRemainingEstimate() > 0) {
+            return base + String.format("；线程池队列已满，约 %d 个文件仍待入队，请稍后再次操作", result.getRemainingEstimate());
+        }
+        return base;
     }
 
     @PostMapping("/task/pool-size")

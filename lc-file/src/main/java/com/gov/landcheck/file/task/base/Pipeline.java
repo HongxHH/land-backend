@@ -47,7 +47,11 @@ public class Pipeline {
      * @throws TaskException 当任意命令执行失败时抛出
      */
     public void execute(TaskData taskData) throws TaskException {
-        log.debug("开始执行管道: {}，包含 {} 个命令", pipelineName, commands.size());
+        Long fileId = taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null;
+        String taskId = taskData.getParseJob() != null ? taskData.getParseJob().getTaskId() : null;
+        log.info("解析管道开始: pipeline={} stages={} fileId={} taskId={}",
+                pipelineName, commands.size(), fileId, taskId);
+        long pipelineStartMs = System.currentTimeMillis();
 
         for (int i = 0; i < commands.size(); i++) {
             Command command = commands.get(i);
@@ -58,28 +62,33 @@ public class Pipeline {
             try {
                 if (command.canSkip(taskData)) {
                     taskData.skipStage(command.getStage(), command.getName(), "条件跳过", endProgress);
-                    log.debug("跳过命令执行: {}", commandInfo);
+                    log.info("解析阶段跳过: stage={} fileId={} taskId={} reason=条件跳过",
+                            command.getStage(), fileId, taskId);
                     continue;
                 }
 
                 taskData.startStage(command.getStage(), command.getName(), null, startProgress);
-                log.debug("开始执行命令: {}", commandInfo);
+                log.info("解析阶段开始: stage={} fileId={} taskId={} progress={}",
+                        command.getStage(), fileId, taskId, startProgress);
                 long startTime = System.currentTimeMillis();
 
                 command.execute(taskData);
                 taskData.completeStage(command.getStage(), null, endProgress);
 
                 long duration = System.currentTimeMillis() - startTime;
-                log.debug("命令执行完成: {}，耗时: {}ms", commandInfo, duration);
+                log.info("解析阶段完成: stage={} fileId={} taskId={} durationMs={} progress={}",
+                        command.getStage(), fileId, taskId, duration, endProgress);
 
             } catch (TaskException e) {
                 taskData.failCurrentStage(e.getMessage());
-                log.error("命令执行失败: {}，错误: {}", commandInfo, e.getMessage());
+                log.error("解析阶段失败: stage={} fileId={} taskId={} error={}",
+                        command.getStage(), fileId, taskId, e.getMessage());
 
                 throw e;
             } catch (Exception e) {
                 taskData.failCurrentStage(e.getMessage());
-                log.error("命令执行异常: {}，异常: {}", commandInfo, e.getMessage(), e);
+                log.error("解析阶段异常: stage={} fileId={} taskId={} error={}",
+                        command.getStage(), fileId, taskId, e.getMessage(), e);
 
                 throw new TaskException(
                         TaskException.ErrorCode.SYSTEM_ERROR,
@@ -91,7 +100,8 @@ public class Pipeline {
             }
         }
 
-        log.debug("管道执行完成: {}", pipelineName);
+        log.info("解析管道完成: pipeline={} fileId={} taskId={} durationMs={}",
+                pipelineName, fileId, taskId, System.currentTimeMillis() - pipelineStartMs);
     }
 
     /**

@@ -27,6 +27,7 @@ public class CorsConfig {
         corsConfiguration.addAllowedMethod("*");
         // Sa-Token 默认头名 satoken，便于前端读取登录接口下发的令牌
         corsConfiguration.addExposedHeader("satoken");
+        corsConfiguration.addExposedHeader("X-Request-Id");
         source.registerCorsConfiguration("/**", corsConfiguration);
         return new CorsFilter(source);
     }

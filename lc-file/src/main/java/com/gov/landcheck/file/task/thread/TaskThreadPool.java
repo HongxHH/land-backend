@@ -28,6 +28,7 @@ import com.gov.landcheck.file.task.base.Task;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskPriority;
 import com.gov.landcheck.file.task.base.TaskStageTrace;
+import com.gov.landcheck.core.config.logging.ContextPropagating;
 import com.gov.landcheck.file.task.executor.PriorityThreadPoolExecutor;
 import com.gov.landcheck.file.task.publisher.TaskResultPublisher;
 
@@ -107,7 +108,7 @@ public class TaskThreadPool {
             throw e;
         }
 
-        CompletableFuture.runAsync(() -> {
+        CompletableFuture.runAsync(ContextPropagating.wrap(() -> {
             Throwable executionError = null;
             try {
                 prioritizedTask.get();
@@ -139,7 +140,7 @@ public class TaskThreadPool {
                     cleanupTask(task, taskId);
                 }
             }
-        }, taskCallbackExecutor);
+        }), taskCallbackExecutor);
 
     }
 

@@ -15,6 +15,7 @@ import com.gov.landcheck.core.bo.dto.OperationAuditLogQueryDTO;
 import com.gov.landcheck.core.bo.dto.OperationAuditLogQueryResultDTO;
 import com.gov.landcheck.core.bo.entity.OperationAuditLog;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
+import com.gov.landcheck.core.config.logging.TraceContext;
 
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -114,6 +115,7 @@ public class OperationAuditServiceImpl implements OperationAuditService {
             logEntity.setContractId(contractId);
             logEntity.setChangeSummary(changeSummary);
             logEntity.setExtra(extra);
+            logEntity.setRequestId(TraceContext.getTraceId());
             logEntity.preSave();
             mongoTemplate.save(logEntity);
         } catch (Exception e) {

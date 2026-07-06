@@ -61,6 +61,10 @@ public class ParseJob extends MongoIdEntity {
     @Schema(description = "创建者（sys_user.id/系统）")
     private Long createdBy;
 
+    @Field(name = "request_id")
+    @Schema(description = "触发解析的 HTTP 请求追踪 ID")
+    private String requestId;
+
     @Field(name = "progress")
     @Schema(description = "解析进度（0-100）", example = "50")
     private Integer progress;

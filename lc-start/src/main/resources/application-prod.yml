@@ -8,6 +8,12 @@ springdoc:
 logging:
   level:
     com.gov.landcheck: INFO
+  file:
+    path: ${LANDCHECK_LOG_DIR:./logs}
+  logback:
+    rollingpolicy:
+      max-file-size: 100MB
+      max-history: 30
 
 spring:
   data:

@@ -371,6 +371,7 @@ public class ParseFileTask implements Task {
                 projectPartySummaryForm.setParseStatus("SUCCESS");
             }
             mongoTemplate.save(projectPartySummaryForm);
+            publishProjectPartySummaryChanged(taskData.getFileRecord().getProjectId(), projectPartySummaryForm.getId());
         }
 
         parseJobUpdateService.updateJobSuccess(taskData.getParseJob(), taskData.getExecutionTime());
@@ -420,6 +421,18 @@ public class ParseFileTask implements Task {
                     .set("update_time", now);
             mongoTemplate.updateFirst(query, update, ProjectPartySurveySummaryForm.class);
             formId = existing.getId();
+        }
+        try {
+            ApplicationEventPublisher publisher = ApplicationContextProvider.getBean(ApplicationEventPublisher.class);
+            publisher.publishEvent(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, formId));
+        } catch (Exception ex) {
+            log.warn("发布项目方汇总变更事件失败: projectId={}, formId={}, error={}", projectId, formId, ex.getMessage());
+        }
+    }
+
+    private void publishProjectPartySummaryChanged(Long projectId, Long formId) {
+        if (projectId == null || formId == null) {
+            return;
         }
         try {
             ApplicationEventPublisher publisher = ApplicationContextProvider.getBean(ApplicationEventPublisher.class);

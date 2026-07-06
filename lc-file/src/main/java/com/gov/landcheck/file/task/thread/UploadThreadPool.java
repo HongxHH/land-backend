@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.gov.landcheck.core.config.logging.ContextPropagating;
 import com.gov.landcheck.file.config.FileProcessingProperties;
 
 import jakarta.annotation.PreDestroy;
@@ -61,13 +62,13 @@ public class UploadThreadPool {
     public void submit(FileUploadPostProcessTask task) {
         String taskId = task.getTaskId();
         try {
-            Future<?> future = executor.submit(task);
+            Future<?> future = executor.submit(ContextPropagating.wrap(task));
             taskFutures.put(taskId, future);
         } catch (RejectedExecutionException e) {
             log.warn("上传后处理任务提交被拒绝: taskId={}, reason={}", taskId, e.getMessage());
             throw e;
         }
-        CompletableFuture.runAsync(() -> {
+        CompletableFuture.runAsync(ContextPropagating.wrap(() -> {
             Future<?> future = taskFutures.get(taskId);
             if (future == null) {
                 return;
@@ -86,7 +87,7 @@ public class UploadThreadPool {
             } finally {
                 taskFutures.remove(taskId);
             }
-        }, callbackExecutor);
+        }), callbackExecutor);
     }
 
     @PreDestroy

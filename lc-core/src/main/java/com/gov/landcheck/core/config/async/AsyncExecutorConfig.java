@@ -12,6 +12,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
 
+import com.gov.landcheck.core.config.logging.ContextPropagatingExecutorService;
+import com.gov.landcheck.core.config.logging.TraceContext;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -37,7 +40,7 @@ public class AsyncExecutorConfig implements AsyncConfigurer {
      */
     @Bean(name = APPLICATION_TASK_EXECUTOR_BEAN_NAME, destroyMethod = "close")
     public static ExecutorService applicationTaskExecutor() {
-        return Executors.newVirtualThreadPerTaskExecutor();
+        return new ContextPropagatingExecutorService(Executors.newVirtualThreadPerTaskExecutor());
     }
 
     @Autowired
@@ -53,7 +56,8 @@ public class AsyncExecutorConfig implements AsyncConfigurer {
 
     @Override
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
-        return (ex, method, params) -> log.error("Async method {} threw", method, ex);
+        return (ex, method, params) -> log.error("Async method {} threw, traceId={}",
+                method, TraceContext.getTraceId(), ex);
     }
 
 }

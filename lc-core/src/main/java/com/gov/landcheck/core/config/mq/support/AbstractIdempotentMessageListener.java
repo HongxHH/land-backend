@@ -1,9 +1,10 @@
 package com.gov.landcheck.core.config.mq.support;
 
-import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import com.gov.landcheck.core.config.logging.TraceContext;
 import com.gov.landcheck.core.config.mq.exception.MessageConsumeException;
 
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,15 @@ public abstract class AbstractIdempotentMessageListener implements RocketMQListe
 
     @Override
     public void onMessage(MessageExt messageExt) {
+        TraceContext.setTraceId("mq-" + messageExt.getMsgId());
+        try {
+            onMessageInternal(messageExt);
+        } finally {
+            TraceContext.clear();
+        }
+    }
+
+    private void onMessageInternal(MessageExt messageExt) {
         String key = resolveIdempotentKey(messageExt);
         if (idempotentChecker != null) {
             IdempotentResult idempotentResult = idempotentChecker.tryMarkProcessed(key, DEFAULT_IDEMPOTENT_TTL_SECONDS);

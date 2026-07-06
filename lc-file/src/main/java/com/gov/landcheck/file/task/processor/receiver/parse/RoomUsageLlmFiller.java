@@ -35,11 +35,13 @@ public class RoomUsageLlmFiller {
 
     public List<RoomInfo> fillRoomUsageFromSurveyConclusion(
             List<RoomInfo> roomInfos, String surveyText, ParsedDataHeader header, FileRecord fileRecord) {
+        long startedAt = System.currentTimeMillis();
+        Long fileRecordId = fileRecord != null ? fileRecord.getId() : null;
         if (roomInfos == null || roomInfos.isEmpty() || surveyText == null || surveyText.trim().isEmpty()) {
             return roomInfos;
         }
         Objects.requireNonNull(header, "ParsedDataHeader 不能为 null");
-        log.debug("表格中没有用途列，开始通过大模型分析填充用途信息");
+        log.info("externalCall=llm action=start fileId={} operation=roomUsageFill", fileRecordId);
 
         try {
             List<String> allRoomNumbers = collectRoomNumbers(roomInfos);
@@ -124,10 +126,15 @@ public class RoomUsageLlmFiller {
             header.setModelAnalysisResult(llmResponse);
             header.setModelPrompt(lastPrompt);
 
-            log.debug("用途分析完成，已填充 {}/{} 个房间", filledCount, totalCount);
+            long durationMs = System.currentTimeMillis() - startedAt;
+            log.info(
+                    "externalCall=llm action=complete fileId={} operation=roomUsageFill durationMs={} outcome=success filled={}/{}",
+                    fileRecordId, durationMs, filledCount, totalCount);
             return filledRoomInfos;
         } catch (Exception e) {
-            Long fileRecordId = fileRecord != null ? fileRecord.getId() : null;
+            long durationMs = System.currentTimeMillis() - startedAt;
+            log.info("externalCall=llm action=complete fileId={} operation=roomUsageFill durationMs={} outcome=error",
+                    fileRecordId, durationMs);
             log.error("填充户室用途时出错: fileRecordId={}, error={}", fileRecordId, e.getMessage(), e);
             header.setModelPrompt(null);
             header.setModelAnalysisResult(null);

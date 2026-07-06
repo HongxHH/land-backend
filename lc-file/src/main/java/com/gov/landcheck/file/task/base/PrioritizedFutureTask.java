@@ -2,6 +2,8 @@ package com.gov.landcheck.file.task.base;
 
 import java.util.concurrent.FutureTask;
 
+import com.gov.landcheck.core.config.logging.ContextPropagating;
+
 import lombok.Getter;
 
 /**
@@ -18,7 +20,7 @@ public class PrioritizedFutureTask extends FutureTask<Void> implements Comparabl
     private final String taskId;
 
     public PrioritizedFutureTask(Task task, TaskPriority priority, String taskId) {
-        super(task::run, null);
+        super(ContextPropagating.wrap(task::run), null);
         this.task = task;
         this.priority = priority;
         this.taskId = taskId;
