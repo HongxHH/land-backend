@@ -35,13 +35,6 @@ public class SurveyReportInfoUpdateDTO {
     @Schema(description = "房产面积确认告知书编号", example = "1234567890")
     private String propertyAreaConfirmationNoticeNumber;
 
-    @Schema(description = "是否通过校验（0否 1是）", example = "0")
-    private Integer isVerified;
-
-    @Schema(description = "校验出错原因", example = "建筑面积总和不一致")
-    private String verificationErrorReason;
-
-
     @Schema(description = "备注")
     private String remark;
 
