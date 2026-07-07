@@ -1,3 +1,5 @@
+name: landcheck-infra
+
 services:
   mongodb:
     image: mongo:8.0.13
@@ -87,7 +89,7 @@ services:
     user: root
     restart: unless-stopped
     volumes:
-      - ./pipeline_config_vllm.yaml:/home/paddleocr/pipeline_config_vllm.yaml
+      - ../../../TestDeploy/pipeline_config_vllm.yaml:/home/paddleocr/pipeline_config_vllm.yaml
     environment:
       - VLM_BACKEND=${VLM_BACKEND:-vllm}
       - DISABLE_MODEL_SOURCE_CHECK=True
