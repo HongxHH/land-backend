@@ -31,6 +31,19 @@ public class AccessLogFilter extends OncePerRequestFilter {
     private static final Pattern SENSITIVE_QUERY_PARAM = Pattern.compile(
             "(?i)(password|token|secret|key|satoken|authorization)=([^&]*)");
 
+    /**
+     * 前端任务池监控等高频轮询接口，正常响应不写 access.log，避免刷屏。
+     * 慢请求（≥ {@link #SLOW_REQUEST_MS}ms）仍会记录。
+     */
+    private static boolean isHighFrequencyPollPath(String uri) {
+        if (uri == null || uri.isBlank()) {
+            return false;
+        }
+        return "/file/task/status".equals(uri)
+                || "/file/task/system-status".equals(uri)
+                || uri.startsWith("/file/task/detail/");
+    }
+
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
@@ -59,8 +72,11 @@ public class AccessLogFilter extends OncePerRequestFilter {
             Long userId = OperatorContext.getOperatorId();
             String userIdText = userId != null ? String.valueOf(userId) : "-";
 
-            ACCESS_LOG.info("traceId={} method={} uri={} status={} durationMs={} userId={}",
-                    traceId, method, uri, status, durationMs, userIdText);
+            boolean pollPath = isHighFrequencyPollPath(request.getRequestURI());
+            if (!pollPath || durationMs >= SLOW_REQUEST_MS) {
+                ACCESS_LOG.info("traceId={} method={} uri={} status={} durationMs={} userId={}",
+                        traceId, method, uri, status, durationMs, userIdText);
+            }
 
             if (durationMs >= SLOW_REQUEST_MS) {
                 log.warn("慢请求: traceId={} method={} uri={} status={} durationMs={} userId={}",

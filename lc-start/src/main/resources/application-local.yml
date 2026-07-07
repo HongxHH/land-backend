@@ -1,0 +1,36 @@
+# 本地开发 profile（spring.profiles.default=local）
+spring:
+  data:
+    mongodb:
+      uri: mongodb://landcheck_user:123@localhost:27017/landcheck?authSource=landcheck&retryWrites=false&replicaSet=rs0
+    redis:
+      host: localhost
+      password: "123"
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+logging:
+  level:
+    com.gov.landcheck: DEBUG
+
+landcheck:
+  security:
+    anon-paths:
+      - /error
+      - /auth/login
+      - /auth/register
+      - /auth/user-types
+      - /v3/api-docs/**
+      - /swagger-ui
+      - /swagger-ui/**
+      - /swagger-ui.html
+      - /doc.html
+      - /webjars/**
+      - /favicon.ico
+  llm:
+    api:
+      key: d49096a7-91b1-41b6-9362-7431861c3e7a
