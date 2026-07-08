@@ -33,4 +33,4 @@ landcheck:
       - /favicon.ico
   llm:
     api:
-      key: d49096a7-91b1-41b6-9362-7431861c3e7a
+      key: ${LANDCHECK_LLM_API_KEY:}

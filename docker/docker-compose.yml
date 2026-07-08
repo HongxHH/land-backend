@@ -89,7 +89,7 @@ services:
     user: root
     restart: unless-stopped
     volumes:
-      - ../../../TestDeploy/pipeline_config_vllm.yaml:/home/paddleocr/pipeline_config_vllm.yaml
+      - ../../../TestDeploy/config/pipeline_config_vllm.yaml:/home/paddleocr/pipeline_config_vllm.yaml
     environment:
       - VLM_BACKEND=${VLM_BACKEND:-vllm}
       - DISABLE_MODEL_SOURCE_CHECK=True
