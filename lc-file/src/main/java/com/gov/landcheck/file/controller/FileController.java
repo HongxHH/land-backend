@@ -247,7 +247,6 @@ public class FileController {
     }
 
     @GetMapping("/parse-job/{parseJobId}/flow")
-    @SaCheckRole(value = UserTypeConstants.DEVELOPER)
     @Operation(summary = "解析任务流水线视图", description = "基于 Mongo 中 parse_job 的阶段字段，任务结束后仍可查看各阶段状态与耗时")
     public AjaxJson getParseJobFlow(@Parameter(description = "parse_job.id") @PathVariable Long parseJobId) {
         try {

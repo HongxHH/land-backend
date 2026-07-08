@@ -85,6 +85,8 @@ public class ProjectPartySummaryServiceImpl implements ProjectPartySummaryServic
                 return AjaxJson.getError("项目方实测汇总主表不存在");
             }
             Update update = DynamicUpdateHelper.buildDynamicUpdate(updateDTO);
+            // 审核保存始终携带 remark，空值表示清空备注
+            DynamicUpdateHelper.applyClearableString(update, "remark", updateDTO.getRemark());
             Set<String> directKeys = projectPartySummaryDirectKeys(existing.getProjectId());
             evictBeforeWrite(directKeys);
             mongoTemplate.updateFirst(query, update, ProjectPartySurveySummaryForm.class);

@@ -35,6 +35,14 @@ public final class DynamicUpdateHelper {
         return update;
     }
 
+    /**
+     * 可清空字符串字段：空白或 null 写入 Mongo null（用于备注等允许用户删空的场景）。
+     * 仅用于请求体始终携带该字段的整表保存接口。
+     */
+    public static void applyClearableString(Update update, String fieldName, String value) {
+        update.set(convertFieldName(fieldName), StringUtils.hasText(value) ? value.trim() : null);
+    }
+
     public static String convertFieldName(String fieldName) {
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < fieldName.length(); i++) {

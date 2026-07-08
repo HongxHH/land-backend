@@ -82,6 +82,7 @@ public class CapacityIndicatorServiceImpl implements CapacityIndicatorService {
                 return AjaxJson.getError("容量指标核查表不存在");
             }
             Update update = DynamicUpdateHelper.buildDynamicUpdate(updateDTO);
+            DynamicUpdateHelper.applyClearableString(update, "remark", updateDTO.getRemark());
             Set<String> directKeys = capacityIndicatorDirectKeys(existing.getProjectId());
             evictBeforeWrite(directKeys);
             mongoTemplate.updateFirst(query, update, CapacityIndicatorInfo.class);
