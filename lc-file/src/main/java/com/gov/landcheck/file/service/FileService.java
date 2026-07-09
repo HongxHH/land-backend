@@ -77,6 +77,11 @@ public interface FileService {
     AjaxJson cancelParseTask(String fileId, String reason);
 
     /**
+     * 按 taskId 取消指定解析任务（任务监控面板）
+     */
+    AjaxJson cancelParseTaskByTaskId(String taskId, String reason);
+
+    /**
      * 根据项目ID获取项目的所有文件信息
      *
      * @param projectId 项目ID

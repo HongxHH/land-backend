@@ -5,6 +5,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
 import com.gov.landcheck.core.bo.entity.FileRecord;
+import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.file.config.FileProcessingProperties;
@@ -56,6 +57,12 @@ public class AutoParseSubmissionService {
         if (fileRecord.getFileState() != FileStateEnum.WAITING_PARSE) {
             log.debug("自动解析跳过：状态非 WAITING_PARSE fileId={}, state={}",
                     fileRecord.getId(), fileRecord.getFileState());
+            return false;
+        }
+
+        ParseJob latestJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileRecord.getId());
+        if (ParseCancelSupport.isUserCancelled(latestJob)) {
+            log.debug("自动解析跳过：用户已取消，等待手动发起 fileId={}", fileRecord.getId());
             return false;
         }
 

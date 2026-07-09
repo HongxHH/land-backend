@@ -271,12 +271,29 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public AjaxJson cancelParseTask(String fileId, String reason) {
-        return cancelParseTask(fileId, reason, true);
+        return cancelParseTask(fileId, reason, false);
+    }
+
+    @Override
+    public AjaxJson cancelParseTaskByTaskId(String taskId, String reason) {
+        try {
+            ParseJob parseJob = fileParseSubmissionService.findByTaskId(taskId);
+            if (parseJob == null || parseJob.getFileRecordId() == null) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务不存在");
+            }
+            FileRecord fileRecord = mongoTemplate.findById(parseJob.getFileRecordId(), FileRecord.class);
+            if (fileRecord == null) {
+                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不存在");
+            }
+            return cancelParseJob(fileRecord, parseJob, reason, false);
+        } catch (Exception e) {
+            log.error("按 taskId 取消解析任务失败: taskId={}, error={}", taskId, e.getMessage(), e);
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "取消解析任务失败");
+        }
     }
 
     private AjaxJson cancelParseTask(String fileId, String reason, boolean scheduleAutoParseAfterCancel) {
         try {
-            // 1. 检查文件是否存在
             FileRecord fileRecord = mongoTemplate.findById(fileId, FileRecord.class);
             if (fileRecord == null) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不存在");
@@ -286,54 +303,80 @@ public class FileServiceImpl implements FileService {
                         FileOperationAuthorization.denyReasonForFileMutate());
             }
 
-            // 2. 获取最新的解析任务
             ParseJob parseJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileRecord.getId());
             if (parseJob == null) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务不存在");
             }
-
-            // 3. 检查解析任务状态：已成功/失败不可取消
-            if (ParseJobStateEnum.SUCCESS.equals(parseJob.getJobStatus())
-                    || ParseJobStateEnum.FAILED.equals(parseJob.getJobStatus())) {
-                log.info("ParseJob id: {} 任务id: {} 任务状态: {}, fileId: {}", parseJob.getId(), parseJob.getTaskId(),
-                        parseJob.getJobStatus(), fileId);
-                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务已结束,无法取消");
-            }
-            // 已取消且线程池中已无该任务：幂等返回成功
-            if (ParseJobStateEnum.CANCELLED.equals(parseJob.getJobStatus())
-                    && !taskExecuteService.isTaskRunning(parseJob.getTaskId())) {
-                AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(),
-                        fileRecord, Map.of("reason", reason != null ? reason : ""), null, null);
-                scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
-                return AjaxJson.getSuccess("解析任务已取消");
-            }
-
-            // 4. 请求取消任务
-            parseJob.requestCancel(reason);
-            mongoTemplate.save(parseJob);
-
-            // 5. 任务在线程池中运行时强制取消；否则回滚中间产物
-            if (taskExecuteService.isTaskRunning(parseJob.getTaskId())) {
-                taskExecuteService.cancelParseTask(parseJob.getTaskId(), reason);
-            } else {
-                taskExecuteService.rollbackParseJob(parseJob, fileRecord);
-                log.info("任务未在线程池运行，已回滚中间数据: taskId={}, fileId={}", parseJob.getTaskId(), fileId);
-            }
-
-            // 6. 更新文件状态
-            fileRecord.setFileState(FileStateEnum.WAITING_PARSE); // 重置为可解析状态
-            fileRecord.setAutoParseQueuedAt(null);
-            mongoTemplate.save(fileRecord);
-
-            AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(), fileRecord,
-                    Map.of("reason", reason != null ? reason : "", "taskId", parseJob.getTaskId()), null, null);
-            scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
-            return AjaxJson.getSuccess("解析任务取消请求已提交");
-
+            return cancelParseJob(fileRecord, parseJob, reason, scheduleAutoParseAfterCancel);
         } catch (Exception e) {
             log.error("取消解析任务失败: fileId={}, error={}", fileId, e.getMessage(), e);
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "取消解析任务失败");
         }
+    }
+
+    private AjaxJson cancelParseJob(FileRecord fileRecord, ParseJob parseJob, String reason,
+            boolean scheduleAutoParseAfterCancel) {
+        Long fileId = fileRecord.getId();
+        ParseJob latestJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileId);
+        boolean targetsCurrentJob = latestJob != null && latestJob.getId().equals(parseJob.getId());
+
+        // 3. 检查解析任务状态：已成功/失败不可取消
+        if (ParseJobStateEnum.SUCCESS.equals(parseJob.getJobStatus())
+                || ParseJobStateEnum.FAILED.equals(parseJob.getJobStatus())) {
+            log.info("ParseJob id: {} 任务id: {} 任务状态: {}, fileId: {}", parseJob.getId(), parseJob.getTaskId(),
+                    parseJob.getJobStatus(), fileId);
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "解析任务已结束,无法取消");
+        }
+        // 已取消且线程池中已无该任务：幂等返回成功
+        if (ParseJobStateEnum.CANCELLED.equals(parseJob.getJobStatus())
+                && !taskExecuteService.isTaskRunning(parseJob.getTaskId())) {
+            AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(),
+                    fileRecord, Map.of("reason", reason != null ? reason : ""), null, null);
+            scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
+            return AjaxJson.getSuccess("解析任务已取消");
+        }
+
+        if (!FileOperationAuthorization.canMutateFile(fileRecord)) {
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
+                    FileOperationAuthorization.denyReasonForFileMutate());
+        }
+
+        // 4. 请求取消任务
+        parseJob.requestCancel(reason);
+        mongoTemplate.save(parseJob);
+
+        // 5. 任务在线程池中运行时强制取消；否则回滚中间产物
+        boolean wasRunningInPool = taskExecuteService.isTaskRunning(parseJob.getTaskId());
+        boolean poolCancelled = false;
+        if (wasRunningInPool) {
+            poolCancelled = taskExecuteService.cancelParseTask(parseJob.getTaskId(), reason);
+        } else {
+            taskExecuteService.rollbackParseJob(parseJob, fileRecord);
+            log.info("任务未在线程池运行，已回滚中间数据: taskId={}, fileId={}", parseJob.getTaskId(), fileId);
+        }
+
+        // 6. 更新文件状态（仅当取消的是当前最新任务时）
+        if (targetsCurrentJob) {
+            fileRecord.setFileState(FileStateEnum.WAITING_PARSE); // 重置为可解析状态
+            fileRecord.setAutoParseQueuedAt(null);
+            mongoTemplate.save(fileRecord);
+
+            AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(),
+                    fileRecord,
+                    Map.of("reason", reason != null ? reason : "", "taskId", parseJob.getTaskId()), null, null);
+            scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
+        } else {
+            log.info("已取消历史解析任务，文件状态不变: taskId={}, fileId={}, latestParseJobId={}",
+                    parseJob.getTaskId(), fileId, latestJob != null ? latestJob.getId() : null);
+        }
+
+        if (wasRunningInPool && taskExecuteService.isTaskRunning(parseJob.getTaskId())) {
+            if (!poolCancelled) {
+                log.warn("线程池未能立即中断任务，取消标记已落库: taskId={}, fileId={}", parseJob.getTaskId(), fileId);
+            }
+            return AjaxJson.getSuccess("取消请求已提交，任务停止中");
+        }
+        return AjaxJson.getSuccess("解析任务已取消");
     }
 
     private void scheduleAutoParseIfNeeded(FileRecord fileRecord, boolean scheduleAutoParseAfterCancel) {

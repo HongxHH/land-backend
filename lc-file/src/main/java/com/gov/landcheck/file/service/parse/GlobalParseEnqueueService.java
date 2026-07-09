@@ -9,6 +9,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import com.gov.landcheck.core.bo.entity.FileRecord;
+import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.file.dto.BulkParseEnqueueResultDTO;
@@ -54,6 +55,12 @@ public class GlobalParseEnqueueService {
                 break;
             }
             if (fileRecord.getId() == null || !FileContextType.isAutoParseContext(fileRecord.getFileContextType())) {
+                continue;
+            }
+            ParseJob latestJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileRecord.getId());
+            if (ParseCancelSupport.isUserCancelled(latestJob)) {
+                skipped++;
+                log.debug("批量入队跳过（用户已取消）: fileId={}", fileRecord.getId());
                 continue;
             }
             scanned++;

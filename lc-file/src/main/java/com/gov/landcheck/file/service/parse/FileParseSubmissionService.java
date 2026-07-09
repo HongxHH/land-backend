@@ -61,6 +61,13 @@ public class FileParseSubmissionService {
         return mongoTemplate.findOne(query, ParseJob.class);
     }
 
+    public ParseJob findByTaskId(String taskId) {
+        if (taskId == null || taskId.isBlank()) {
+            return null;
+        }
+        return mongoTemplate.findOne(Query.query(Criteria.where("task_id").is(taskId)), ParseJob.class);
+    }
+
     public SubmitParseResult submitParseIfEligible(FileRecord fileRecord) {
         FileStateEnum rollbackState = null;
         Long fileRecordId = null;

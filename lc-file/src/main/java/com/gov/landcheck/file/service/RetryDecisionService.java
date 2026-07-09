@@ -50,6 +50,12 @@ public class RetryDecisionService {
             logNoRetryDecision(null, "parseJob为空");
             return RetryDecision.noRetry("parseJob为空");
         }
+        if (parseJob.getId() != null) {
+            ParseJob latest = mongoTemplate.findById(parseJob.getId(), ParseJob.class);
+            if (latest != null) {
+                parseJob = latest;
+            }
+        }
         if (parseJob.isCancelRequested()) {
             logNoRetryDecision(parseJob, "任务已取消");
             return RetryDecision.noRetry("任务已取消");

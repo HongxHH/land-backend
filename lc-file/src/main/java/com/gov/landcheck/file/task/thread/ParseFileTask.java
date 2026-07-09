@@ -107,6 +107,12 @@ public class ParseFileTask implements Task {
             // 2. 更新任务状态为运行中
             updateTaskStatus(ParseJobStateEnum.RUNNING);
 
+            // 2.1 落库前已被取消（竞态）
+            if (shouldStop()) {
+                cancel(cancelReason != null ? cancelReason : "任务已取消");
+                return;
+            }
+
             // 3. 交给Executor执行文件解析
             parseFileExecutor.execute(taskData);
 
@@ -160,6 +166,10 @@ public class ParseFileTask implements Task {
                     taskData.getFileRecord().getId(), getTaskId());
             return;
         }
+        if (shouldStop()) {
+            cancel(cancelReason != null ? cancelReason : "任务已取消");
+            return;
+        }
         log.debug("ParseFileTask 成功回调: fileId={}, taskId={}", taskData.getFileRecord().getId(), getTaskId());
         try {
             taskData.updateProgress(100);
@@ -167,6 +177,11 @@ public class ParseFileTask implements Task {
             updateTaskStatus(ParseJobStateEnum.SUCCESS);
             recordParseCompleteAudit();
         } catch (Exception e) {
+            if (e instanceof TaskException taskEx
+                    && TaskException.ErrorCode.TASK_CANCELLED.equals(taskEx.getErrorCode())) {
+                cancel(cancelReason != null ? cancelReason : taskEx.getMessage());
+                return;
+            }
             log.error("更新任务成功状态失败: fileId={}, taskId={}, error={}",
                     taskData.getFileRecord().getId(), getTaskId(), e.getMessage(), e);
         }
@@ -255,10 +270,28 @@ public class ParseFileTask implements Task {
             return true;
         }
         ParseJob parseJob = taskData.getParseJob();
-        if (parseJob != null && parseJob.isCancelRequested()) {
+        if (parseJob == null || parseJob.getId() == null) {
+            return false;
+        }
+        if (parseJob.isCancelRequested()) {
             cancelled = true;
             cancelReason = parseJob.getCancelReason();
             return true;
+        }
+        try {
+            MongoTemplate mongoTemplate = ApplicationContextProvider.getBean(MongoTemplate.class);
+            ParseJob latest = mongoTemplate.findById(parseJob.getId(), ParseJob.class);
+            if (latest != null) {
+                taskData.setParseJob(latest);
+                if (latest.isCancelRequested()) {
+                    cancelled = true;
+                    cancelReason = latest.getCancelReason();
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("刷新 ParseJob 取消状态失败: parseJobId={}, error={}",
+                    parseJob.getId(), e.getMessage());
         }
         return false;
     }
@@ -284,7 +317,9 @@ public class ParseFileTask implements Task {
             case RUNNING -> {
                 taskData.getFileRecord().setFileState(FileStateEnum.PARSING);
                 mongoTemplate.save(taskData.getFileRecord());
-                parseJobUpdateService.updateRunning(taskData.getParseJob());
+                if (!parseJobUpdateService.updateRunning(taskData.getParseJob())) {
+                    throw new TaskException(TaskException.ErrorCode.TASK_CANCELLED, "任务已取消");
+                }
             }
 
             case SUCCESS -> {
@@ -374,7 +409,9 @@ public class ParseFileTask implements Task {
             publishProjectPartySummaryChanged(taskData.getFileRecord().getProjectId(), projectPartySummaryForm.getId());
         }
 
-        parseJobUpdateService.updateJobSuccess(taskData.getParseJob(), taskData.getExecutionTime());
+        if (!parseJobUpdateService.updateJobSuccess(taskData.getParseJob(), taskData.getExecutionTime())) {
+            throw new TaskException(TaskException.ErrorCode.TASK_CANCELLED, "任务已取消，跳过成功落库");
+        }
         mongoTemplate.save(taskData.getFileRecord());
     }
 

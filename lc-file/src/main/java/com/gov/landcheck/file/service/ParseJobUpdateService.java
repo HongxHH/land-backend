@@ -13,8 +13,10 @@ public interface ParseJobUpdateService {
 
     /**
      * 更新为运行中（任务开始）
+     *
+     * @return 是否成功落库（已取消的任务返回 false）
      */
-    void updateRunning(ParseJob parseJob);
+    boolean updateRunning(ParseJob parseJob);
 
     /**
      * 预处理开始
@@ -93,8 +95,10 @@ public interface ParseJobUpdateService {
 
     /**
      * 任务成功
+     *
+     * @return 是否成功落库（已取消的任务返回 false）
      */
-    void updateJobSuccess(ParseJob parseJob, Long executionTimeMs);
+    boolean updateJobSuccess(ParseJob parseJob, Long executionTimeMs);
 
     /**
      * 任务失败

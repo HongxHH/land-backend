@@ -269,11 +269,7 @@ public class FileController {
             @Parameter(description = "任务ID") @PathVariable String taskId,
             @Parameter(description = "取消原因") @RequestParam(value = "reason", defaultValue = "用户主动取消") String reason) {
         try {
-            boolean cancelled = taskExecuteService.cancelTaskByTaskId(taskId, reason);
-            if (cancelled) {
-                return AjaxJson.getSuccess("任务取消成功");
-            }
-            return AjaxJson.get(400, "任务取消失败，任务可能已结束或不存在");
+            return fileService.cancelParseTaskByTaskId(taskId, reason);
         } catch (Exception e) {
             return AjaxJson.get(500, "取消任务失败");
         }

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
+import com.mongodb.client.result.UpdateResult;
 
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +32,7 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
     private MongoTemplate mongoTemplate;
 
     @Override
-    public void updateRunning(ParseJob parseJob) {
+    public boolean updateRunning(ParseJob parseJob) {
         LocalDateTime now = LocalDateTime.now();
         parseJob.setJobStatus(ParseJobStateEnum.RUNNING);
         parseJob.setStartedAt(now);
@@ -68,7 +69,7 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setRetryStatus("NONE");
         parseJob.setNextRetryAt(null);
         parseJob.setRetryReason(null);
-        doUpdate(parseJob, new Update()
+        return doUpdate(parseJob, new Update()
                 .set("job_status", parseJob.getJobStatus())
                 .set("started_at", parseJob.getStartedAt())
                 .set("thread_id", parseJob.getThreadId())
@@ -108,7 +109,7 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
                 .set("retry_status", parseJob.getRetryStatus())
                 .set("next_retry_at", parseJob.getNextRetryAt())
                 .set("retry_reason", parseJob.getRetryReason())
-                .set("update_time", now), "RUNNING");
+                .set("update_time", now), "RUNNING", true);
     }
 
     @Override
@@ -128,8 +129,11 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setPreprocessGridfsId(preprocessGridfsId);
         parseJob.setPreprocessDurationMs(stageDurationMs(parseJob.getPreprocessStartedAt(), now));
         parseJob.updateProgress();
-        doUpdate(parseJob, buildStageUpdate(parseJob, "preprocess_status", "preprocess_finished_at", "preprocess_gridfs_id", "preprocess_duration_ms")
-                .set("progress", parseJob.getProgress()), "PREPROCESS_COMPLETED");
+        doUpdate(parseJob,
+                buildStageUpdate(parseJob, "preprocess_status", "preprocess_finished_at", "preprocess_gridfs_id",
+                        "preprocess_duration_ms")
+                        .set("progress", parseJob.getProgress()),
+                "PREPROCESS_COMPLETED");
     }
 
     @Override
@@ -168,8 +172,10 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setOcrResultPath(ocrResultPath);
         parseJob.setOcrDurationMs(stageDurationMs(parseJob.getOcrStartedAt(), now));
         parseJob.updateProgress();
-        doUpdate(parseJob, buildStageUpdate(parseJob, "ocr_status", "ocr_finished_at", "ocr_result_path", "ocr_duration_ms")
-                .set("progress", parseJob.getProgress()), "OCR_COMPLETED");
+        doUpdate(parseJob,
+                buildStageUpdate(parseJob, "ocr_status", "ocr_finished_at", "ocr_result_path", "ocr_duration_ms")
+                        .set("progress", parseJob.getProgress()),
+                "OCR_COMPLETED");
     }
 
     @Override
@@ -208,8 +214,10 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setLlmResultPath(llmResultPath != null ? llmResultPath : "");
         parseJob.setParseDurationMs(stageDurationMs(parseJob.getParseStartedAt(), now));
         parseJob.updateProgress();
-        doUpdate(parseJob, buildStageUpdate(parseJob, "parse_status", "parse_finished_at", "llm_result_path", "parse_duration_ms")
-                .set("progress", parseJob.getProgress()), "PARSE_COMPLETED");
+        doUpdate(parseJob,
+                buildStageUpdate(parseJob, "parse_status", "parse_finished_at", "llm_result_path", "parse_duration_ms")
+                        .set("progress", parseJob.getProgress()),
+                "PARSE_COMPLETED");
     }
 
     @Override
@@ -248,8 +256,10 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setFillResultCount(fillResultCount);
         parseJob.setFillDurationMs(stageDurationMs(parseJob.getFillStartedAt(), now));
         parseJob.updateProgress();
-        doUpdate(parseJob, buildStageUpdate(parseJob, "fill_status", "fill_finished_at", "fill_result_count", "fill_duration_ms")
-                .set("progress", parseJob.getProgress()), "FILL_COMPLETED");
+        doUpdate(parseJob,
+                buildStageUpdate(parseJob, "fill_status", "fill_finished_at", "fill_result_count", "fill_duration_ms")
+                        .set("progress", parseJob.getProgress()),
+                "FILL_COMPLETED");
     }
 
     @Override
@@ -288,8 +298,11 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setValidateResultSummary(summary != null ? summary : "");
         parseJob.setValidateDurationMs(stageDurationMs(parseJob.getValidateStartedAt(), now));
         parseJob.updateProgress();
-        doUpdate(parseJob, buildStageUpdate(parseJob, "validate_status", "validate_finished_at", "validate_result_summary", "validate_duration_ms")
-                .set("progress", parseJob.getProgress()), "VALIDATE_COMPLETED");
+        doUpdate(parseJob,
+                buildStageUpdate(parseJob, "validate_status", "validate_finished_at", "validate_result_summary",
+                        "validate_duration_ms")
+                        .set("progress", parseJob.getProgress()),
+                "VALIDATE_COMPLETED");
     }
 
     @Override
@@ -312,7 +325,7 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
     }
 
     @Override
-    public void updateJobSuccess(ParseJob parseJob, Long executionTimeMs) {
+    public boolean updateJobSuccess(ParseJob parseJob, Long executionTimeMs) {
         LocalDateTime now = LocalDateTime.now();
         parseJob.setJobStatus(ParseJobStateEnum.SUCCESS);
         parseJob.setFinishedAt(now);
@@ -321,7 +334,7 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         parseJob.setRetryStatus("NONE");
         parseJob.setNextRetryAt(null);
         parseJob.setRetryReason(null);
-        doUpdate(parseJob, new Update()
+        return doUpdate(parseJob, new Update()
                 .set("job_status", parseJob.getJobStatus())
                 .set("finished_at", parseJob.getFinishedAt())
                 .set("execution_time_ms", parseJob.getExecutionTimeMs())
@@ -329,7 +342,7 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
                 .set("retry_status", parseJob.getRetryStatus())
                 .set("next_retry_at", parseJob.getNextRetryAt())
                 .set("retry_reason", parseJob.getRetryReason())
-                .set("update_time", now), "JOB_SUCCESS");
+                .set("update_time", now), "JOB_SUCCESS", true);
     }
 
     @Override
@@ -417,7 +430,8 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
             switch (field) {
                 case "preprocess_status" -> update.set("preprocess_status", parseJob.getPreprocessStatus());
                 case "preprocess_started_at" -> update.set("preprocess_started_at", parseJob.getPreprocessStartedAt());
-                case "preprocess_finished_at" -> update.set("preprocess_finished_at", parseJob.getPreprocessFinishedAt());
+                case "preprocess_finished_at" ->
+                    update.set("preprocess_finished_at", parseJob.getPreprocessFinishedAt());
                 case "preprocess_gridfs_id" -> update.set("preprocess_gridfs_id", parseJob.getPreprocessGridfsId());
                 case "ocr_status" -> update.set("ocr_status", parseJob.getOcrStatus());
                 case "ocr_started_at" -> update.set("ocr_started_at", parseJob.getOcrStartedAt());
@@ -431,7 +445,8 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
                 case "fill_started_at" -> update.set("fill_started_at", parseJob.getFillStartedAt());
                 case "fill_finished_at" -> update.set("fill_finished_at", parseJob.getFillFinishedAt());
                 case "fill_result_count" -> update.set("fill_result_count", parseJob.getFillResultCount());
-                case "preprocess_duration_ms" -> update.set("preprocess_duration_ms", parseJob.getPreprocessDurationMs());
+                case "preprocess_duration_ms" ->
+                    update.set("preprocess_duration_ms", parseJob.getPreprocessDurationMs());
                 case "ocr_duration_ms" -> update.set("ocr_duration_ms", parseJob.getOcrDurationMs());
                 case "parse_duration_ms" -> update.set("parse_duration_ms", parseJob.getParseDurationMs());
                 case "fill_duration_ms" -> update.set("fill_duration_ms", parseJob.getFillDurationMs());
@@ -439,8 +454,10 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
                 case "validate_status" -> update.set("validate_status", parseJob.getValidateStatus());
                 case "validate_started_at" -> update.set("validate_started_at", parseJob.getValidateStartedAt());
                 case "validate_finished_at" -> update.set("validate_finished_at", parseJob.getValidateFinishedAt());
-                case "validate_result_summary" -> update.set("validate_result_summary", parseJob.getValidateResultSummary());
-                default -> { }
+                case "validate_result_summary" ->
+                    update.set("validate_result_summary", parseJob.getValidateResultSummary());
+                default -> {
+                }
             }
         }
         return update;
@@ -457,14 +474,27 @@ public class ParseJobUpdateServiceImpl implements ParseJobUpdateService {
         return ms >= 0 ? ms : null;
     }
 
-    private void doUpdate(ParseJob parseJob, Update update, String stage) {
+    private boolean doUpdate(ParseJob parseJob, Update update, String stage) {
+        return doUpdate(parseJob, update, stage, false);
+    }
+
+    private boolean doUpdate(ParseJob parseJob, Update update, String stage, boolean rejectIfCancelled) {
         if (parseJob == null || parseJob.getId() == null) {
             log.warn("ParseJobUpdateService skip: parseJob or id is null, stage={}", stage);
-            return;
+            return false;
         }
         try {
             Query query = Query.query(Criteria.where("_id").is(parseJob.getId()));
-            mongoTemplate.updateFirst(query, update, ParseJob.class);
+            if (rejectIfCancelled) {
+                query.addCriteria(Criteria.where("cancel_requested").ne(true));
+                query.addCriteria(Criteria.where("job_status").ne(ParseJobStateEnum.CANCELLED));
+            }
+            UpdateResult result = mongoTemplate.updateFirst(query, update, ParseJob.class);
+            boolean updated = result.getModifiedCount() > 0;
+            if (rejectIfCancelled && !updated) {
+                log.info("ParseJobUpdateService skip cancelled job: parseJobId={}, stage={}", parseJob.getId(), stage);
+            }
+            return updated;
         } catch (Exception e) {
             log.error("ParseJobUpdateService update failed: parseJobId={}, stage={}, error={}",
                     parseJob.getId(), stage, e.getMessage(), e);
