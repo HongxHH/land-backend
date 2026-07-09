@@ -79,6 +79,9 @@ public class FileRecordVO {
     @Schema(description = "遗留字段：历史延迟自动解析队列入队时间，新流程不再写入")
     private LocalDateTime autoParseQueuedAt;
 
+    @Schema(description = "用户取消解析后为 true，前端展示待手动解析")
+    private Boolean autoParseSuppressed;
+
     @Schema(description = "期数")
     private Integer phase;
 

@@ -128,6 +128,7 @@ public class FileParseSubmissionService {
                         .in(FileStateEnum.WAITING_PARSE, FileStateEnum.PARSE_COMPLETE, FileStateEnum.PARSE_FAIL));
                 Update update = new Update()
                         .set("file_state", FileStateEnum.PENDING)
+                        .set("auto_parse_suppressed", false)
                         .set("update_time", java.time.LocalDateTime.now())
                         .unset("auto_parse_queued_at");
                 UpdateResult result = mongoTemplate.updateFirst(query, update, FileRecord.class);
@@ -138,6 +139,7 @@ public class FileParseSubmissionService {
             }
             fileRecord.setFileState(FileStateEnum.PENDING);
             fileRecord.setAutoParseQueuedAt(null);
+            fileRecord.setAutoParseSuppressed(false);
 
             String taskId = taskExecuteService.executeParseTask(fileRecord, rollbackState);
             return SubmitParseResult.success(taskId);

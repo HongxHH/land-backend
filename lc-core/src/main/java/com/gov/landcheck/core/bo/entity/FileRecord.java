@@ -92,6 +92,10 @@ public class FileRecord extends MongoIdEntity {
     @Schema(description = "遗留字段：历史延迟自动解析队列入队时间，新流程不再写入")
     private LocalDateTime autoParseQueuedAt;
 
+    @Field(name = "auto_parse_suppressed")
+    @Schema(description = "用户取消解析后为 true，阻止自动解析并展示为待手动解析")
+    private Boolean autoParseSuppressed = false;
+
     @Field(name = "phase")
     @Schema(description = "期数")
     private Integer phase;

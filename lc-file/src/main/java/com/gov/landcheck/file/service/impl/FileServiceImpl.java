@@ -76,6 +76,7 @@ import com.gov.landcheck.file.dto.SubmitParseResult;
 import com.gov.landcheck.file.service.FileService;
 import com.gov.landcheck.core.utils.UploadFileNameSanitizer;
 import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
+import com.gov.landcheck.file.service.parse.ParseCancelSupport;
 import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.UploadRecordService;
@@ -330,6 +331,10 @@ public class FileServiceImpl implements FileService {
         // 已取消且线程池中已无该任务：幂等返回成功
         if (ParseJobStateEnum.CANCELLED.equals(parseJob.getJobStatus())
                 && !taskExecuteService.isTaskRunning(parseJob.getTaskId())) {
+            if (targetsCurrentJob && ParseCancelSupport.isUserInitiatedReason(reason)) {
+                fileRecord.setAutoParseSuppressed(true);
+                mongoTemplate.save(fileRecord);
+            }
             AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(),
                     fileRecord, Map.of("reason", reason != null ? reason : ""), null, null);
             scheduleAutoParseIfNeeded(fileRecord, scheduleAutoParseAfterCancel);
@@ -359,6 +364,9 @@ public class FileServiceImpl implements FileService {
         if (targetsCurrentJob) {
             fileRecord.setFileState(FileStateEnum.WAITING_PARSE); // 重置为可解析状态
             fileRecord.setAutoParseQueuedAt(null);
+            if (ParseCancelSupport.isUserInitiatedReason(reason)) {
+                fileRecord.setAutoParseSuppressed(true);
+            }
             mongoTemplate.save(fileRecord);
 
             AuditFileRecorder.recordFileOperation(operationAuditService, OperationType.PARSE_CANCEL.name(),
@@ -1193,8 +1201,9 @@ public class FileServiceImpl implements FileService {
                     .distinct()
                     .collect(Collectors.toList());
             Map<Long, VerificationData> verificationMap = buildSurveyReportVerificationMap(surveyReportFileIds);
+            Map<Long, Boolean> autoParseSuppressedMap = resolveAutoParseSuppressedFlags(records);
             List<FileRecordVO> voList = records.stream()
-                    .map(f -> toFileRecordVO(f, verificationMap))
+                    .map(f -> toFileRecordVO(f, verificationMap, autoParseSuppressedMap))
                     .collect(Collectors.toList());
 
             // 构建分页结果
@@ -1268,12 +1277,42 @@ public class FileServiceImpl implements FileService {
                         r -> new VerificationData(r.getIsVerified(), r.getVerificationErrorReason()), (a, b) -> a));
     }
 
+    private Map<Long, Boolean> resolveAutoParseSuppressedFlags(List<FileRecord> records) {
+        Map<Long, Boolean> result = new HashMap<>();
+        if (records == null || records.isEmpty()) {
+            return result;
+        }
+        for (FileRecord record : records) {
+            if (record.getId() == null) {
+                continue;
+            }
+            if (Boolean.TRUE.equals(record.getAutoParseSuppressed())) {
+                result.put(record.getId(), true);
+                continue;
+            }
+            if (FileStateEnum.WAITING_PARSE.equals(record.getFileState())
+                    && FileContextType.isAutoParseContext(record.getFileContextType())) {
+                ParseJob latest = fileParseSubmissionService.findLatestParseJobByFileRecordId(record.getId());
+                if (ParseCancelSupport.isUserCancelled(latest)) {
+                    result.put(record.getId(), true);
+                }
+            }
+        }
+        return result;
+    }
+
     /**
      * FileRecord 转 FileRecordVO，实测报告类型填充 isVerified、verificationErrorReason
      */
-    private FileRecordVO toFileRecordVO(FileRecord record, Map<Long, VerificationData> verificationMap) {
+    private FileRecordVO toFileRecordVO(FileRecord record, Map<Long, VerificationData> verificationMap,
+            Map<Long, Boolean> autoParseSuppressedMap) {
         FileRecordVO vo = new FileRecordVO();
         BeanUtils.copyProperties(record, vo);
+        if (record.getId() != null && autoParseSuppressedMap != null) {
+            vo.setAutoParseSuppressed(Boolean.TRUE.equals(autoParseSuppressedMap.get(record.getId())));
+        } else {
+            vo.setAutoParseSuppressed(Boolean.TRUE.equals(record.getAutoParseSuppressed()));
+        }
         if (record.getFileContextType() == FileContextType.SURVEY_REPORT && record.getId() != null) {
             VerificationData data = verificationMap.get(record.getId());
             if (data != null) {
