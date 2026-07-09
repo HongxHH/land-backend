@@ -399,14 +399,35 @@ public class ParseFileTask implements Task {
             surveyReportInfo.setIsParsed(1);
             mongoTemplate.save(surveyReportInfo);
         }
-        ProjectPartySurveySummaryForm projectPartySummaryForm = taskData.getProjectPartySummaryForm();
-        if (projectPartySummaryForm != null) {
-            projectPartySummaryForm.setIsParsed(1);
-            if (projectPartySummaryForm.getParseStatus() == null) {
-                projectPartySummaryForm.setParseStatus("SUCCESS");
+        ProjectPartySurveySummaryForm parsedForm = taskData.getProjectPartySummaryForm();
+        if (parsedForm != null) {
+            Long fileRecordId = taskData.getFileRecord().getId();
+            Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
+            ProjectPartySurveySummaryForm existing = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
+            ProjectPartySurveySummaryForm target = existing != null ? existing : parsedForm;
+            if (existing == null) {
+                if (target.getProjectId() == null) {
+                    target.setProjectId(taskData.getFileRecord().getProjectId());
+                }
+                if (target.getFileRecordId() == null) {
+                    target.setFileRecordId(fileRecordId);
+                }
             }
-            mongoTemplate.save(projectPartySummaryForm);
-            publishProjectPartySummaryChanged(taskData.getFileRecord().getProjectId(), projectPartySummaryForm.getId());
+            target.setDeclaredTotals(parsedForm.getDeclaredTotals());
+            target.setIsParsed(1);
+            if (StringUtils.hasText(parsedForm.getParseStatus())) {
+                target.setParseStatus(parsedForm.getParseStatus());
+            } else if (!StringUtils.hasText(target.getParseStatus())) {
+                target.setParseStatus("SUCCESS");
+            }
+            target.setRemark(parsedForm.getRemark());
+            if (existing == null) {
+                target.preSave();
+            } else {
+                target.setUpdateTime(LocalDateTime.now());
+            }
+            mongoTemplate.save(target);
+            publishProjectPartySummaryChanged(taskData.getFileRecord().getProjectId(), target.getId());
         }
 
         if (!parseJobUpdateService.updateJobSuccess(taskData.getParseJob(), taskData.getExecutionTime())) {

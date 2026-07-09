@@ -83,7 +83,7 @@ public class FileProcessingProperties {
         /** 上传后处理完成是否自动提交解析任务到线程池 */
         private boolean enabled = true;
         /** 线程池满时 WAITING_PARSE 文件的轮询重试间隔（毫秒） */
-        private long retryIntervalMs = 5_000L;
+        private long retryIntervalMs = 30_000L;
         /** 每次轮询最多尝试提交的文件数 */
         private int retryBatchSize = 16;
     }

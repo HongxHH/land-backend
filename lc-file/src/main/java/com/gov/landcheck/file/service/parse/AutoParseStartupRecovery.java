@@ -44,7 +44,8 @@ public class AutoParseStartupRecovery implements ApplicationRunner {
             return;
         }
         try {
-            Query query = new Query(Criteria.where("file_state").is(FileStateEnum.WAITING_PARSE));
+            Query query = new Query(Criteria.where("file_state").is(FileStateEnum.WAITING_PARSE)
+                    .and("auto_parse_suppressed").ne(true));
             List<FileRecord> waitingFiles = mongoTemplate.find(query, FileRecord.class);
             int attempted = 0;
             int submitted = 0;

@@ -8,8 +8,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -21,13 +19,13 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 import com.gov.landcheck.core.audit.AuditOperation;
 import com.gov.landcheck.core.audit.OperationType;
 import com.gov.landcheck.core.audit.TargetType;
 import com.gov.landcheck.core.bo.R.AjaxJson;
 import com.gov.landcheck.core.bo.entity.FileRecord;
-import com.gov.landcheck.core.bo.entity.Project;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.common.ValidationResult;
@@ -38,6 +36,7 @@ import com.gov.landcheck.core.config.query.MongoQueryBuilder;
 import com.gov.landcheck.core.enums.FloorAreaTypeEnum;
 import com.gov.landcheck.core.enums.UsageCategoryEnum;
 import com.gov.landcheck.core.service.SurveyReportCalculationService;
+import com.gov.landcheck.core.util.RoomInfoValidator;
 import com.gov.landcheck.project.cache.ProjectCacheKeys;
 import com.gov.landcheck.project.dto.RoomInfoCreateDTO;
 import com.gov.landcheck.project.dto.RoomInfoQueryDTO;
@@ -51,6 +50,8 @@ import com.gov.landcheck.project.utils.DynamicUpdateHelper;
 import com.gov.landcheck.project.utils.PageSortSupport;
 import com.gov.landcheck.project.vo.RoomInfoVO;
 import com.gov.landcheck.project.vo.SurveyReportInfoVO;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
@@ -200,6 +201,18 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
                 return AjaxJson.getError(
                         "用途类别无效，可选：RESIDENTIAL、COMMERCIAL、MANAGEMENT、OTHER_BUILDABLE、COMMUNITY、OTHER_PUBLIC、UNKNOWN");
             }
+            String roomLevel = RoomInfoValidator.normalizeKeyPart(createDTO.getRoomLevel());
+            String roomNumber = RoomInfoValidator.normalizeKeyPart(createDTO.getRoomNumber());
+            ValidationResult validation = RoomInfoValidator.validateRoom(
+                    roomLevel, roomNumber,
+                    createDTO.getBuildingArea(), createDTO.getInnerArea(),
+                    createDTO.getBalconyArea(), createDTO.getSharedArea());
+            if (!validation.isValid()) {
+                return AjaxJson.getError(validation.getErrorMessage());
+            }
+            if (hasDuplicateRoom(createDTO.getSurveyReportInfoId(), null, roomLevel, roomNumber)) {
+                return AjaxJson.getError(String.format("该实测报告下已存在楼层「%s」房号「%s」的户室", roomLevel, roomNumber));
+            }
             Set<String> directKeys = new HashSet<>();
             directKeys.add(projectCacheKeys.roomsByProjectAndSurveyReport(createDTO.getProjectId(),
                     createDTO.getSurveyReportInfoId()));
@@ -214,8 +227,8 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             roomInfo.setFloorAreaType(createDTO.getFloorAreaType() != null
                     ? createDTO.getFloorAreaType()
                     : FloorAreaTypeEnum.getByCode(usageCategoryEnum.getFloorAreaType()));
-            roomInfo.setRoomLevel(createDTO.getRoomLevel());
-            roomInfo.setRoomNumber(createDTO.getRoomNumber());
+            roomInfo.setRoomLevel(roomLevel);
+            roomInfo.setRoomNumber(roomNumber);
             roomInfo.setBuildingArea(createDTO.getBuildingArea());
             roomInfo.setInnerArea(createDTO.getInnerArea());
             roomInfo.setBalconyArea(createDTO.getBalconyArea());
@@ -244,7 +257,15 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             if (existingRoom == null) {
                 return AjaxJson.getError("Room info not found");
             }
+            String roomLevel = mergeRoomString(updateDTO.getRoomLevel(), existingRoom.getRoomLevel());
+            String roomNumber = mergeRoomString(updateDTO.getRoomNumber(), existingRoom.getRoomNumber());
+            if (StringUtils.hasText(roomLevel) && StringUtils.hasText(roomNumber)
+                    && hasDuplicateRoom(existingRoom.getSurveyReportInfoId(), existingRoom.getId(), roomLevel,
+                            roomNumber)) {
+                return AjaxJson.getError(String.format("该实测报告下已存在楼层「%s」房号「%s」的户室", roomLevel, roomNumber));
+            }
             Update update = DynamicUpdateHelper.buildDynamicUpdate(updateDTO);
+            applyNormalizedRoomIdentity(update, updateDTO);
             Set<String> directKeys = new HashSet<>();
             if (existingRoom.getProjectId() != null && existingRoom.getSurveyReportInfoId() != null) {
                 directKeys.add(projectCacheKeys.roomsByProjectAndSurveyReport(existingRoom.getProjectId(),
@@ -386,6 +407,42 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
 
     private boolean isText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String mergeRoomString(String updated, String existing) {
+        if (updated != null && StringUtils.hasText(updated)) {
+            return RoomInfoValidator.normalizeKeyPart(updated);
+        }
+        return RoomInfoValidator.normalizeKeyPart(existing);
+    }
+
+    private void applyNormalizedRoomIdentity(Update update, RoomInfoUpdateDTO updateDTO) {
+        if (updateDTO.getRoomLevel() != null && StringUtils.hasText(updateDTO.getRoomLevel())) {
+            update.set("room_level", RoomInfoValidator.normalizeKeyPart(updateDTO.getRoomLevel()));
+        }
+        if (updateDTO.getRoomNumber() != null && StringUtils.hasText(updateDTO.getRoomNumber())) {
+            update.set("room_number", RoomInfoValidator.normalizeKeyPart(updateDTO.getRoomNumber()));
+        }
+    }
+
+    private boolean hasDuplicateRoom(Long surveyReportInfoId, Long excludeRoomId, String roomLevel,
+            String roomNumber) {
+        if (surveyReportInfoId == null) {
+            return false;
+        }
+        String targetKey = RoomInfoValidator.buildIdentityKey(roomLevel, roomNumber);
+        Query query = new Query(Criteria.where("survey_report_info_id").is(surveyReportInfoId));
+        if (excludeRoomId != null) {
+            query.addCriteria(Criteria.where("_id").ne(excludeRoomId));
+        }
+        List<RoomInfo> rooms = mongoTemplate.find(query, RoomInfo.class);
+        for (RoomInfo room : rooms) {
+            String key = RoomInfoValidator.buildIdentityKey(room.getRoomLevel(), room.getRoomNumber());
+            if (targetKey.equals(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void evictBeforeWrite(Set<String> directKeys) {

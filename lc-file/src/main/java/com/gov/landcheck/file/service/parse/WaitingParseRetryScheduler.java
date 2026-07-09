@@ -84,7 +84,8 @@ public class WaitingParseRetryScheduler {
         }
         try {
             int batchSize = properties.getAutoParse().getRetryBatchSize();
-            Query query = new Query(Criteria.where("file_state").is(FileStateEnum.WAITING_PARSE))
+            Query query = new Query(Criteria.where("file_state").is(FileStateEnum.WAITING_PARSE)
+                    .and("auto_parse_suppressed").ne(true))
                     .with(Sort.by(Sort.Direction.ASC, "update_time"))
                     .limit(batchSize);
             List<FileRecord> waitingFiles = mongoTemplate.find(query, FileRecord.class);
