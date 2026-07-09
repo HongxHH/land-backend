@@ -18,10 +18,16 @@ public final class ParseJobStageHelper {
         if (taskData != null && taskData.isFillCommandEntered()) {
             return true;
         }
+        if (taskData != null && taskData.isOfflineRollback()) {
+            return stageNeedsOfflineRollback(parseJob != null ? parseJob.getFillStatus() : null);
+        }
         return stageStarted(parseJob != null ? parseJob.getFillStatus() : null);
     }
 
     public static boolean hasValidateStageStarted(ParseJob parseJob, TaskData taskData) {
+        if (taskData != null && taskData.isOfflineRollback()) {
+            return stageNeedsOfflineRollback(parseJob != null ? parseJob.getValidateStatus() : null);
+        }
         return stageStarted(parseJob != null ? parseJob.getValidateStatus() : null);
     }
 
@@ -33,11 +39,22 @@ public final class ParseJobStageHelper {
         return !"PENDING".equals(normalized) && !"SKIPPED".equals(normalized);
     }
 
+    private static boolean stageNeedsOfflineRollback(String status) {
+        if (!StringUtils.hasText(status)) {
+            return false;
+        }
+        String normalized = status.trim().toUpperCase();
+        return "PROCESSING".equals(normalized)
+                || "FAILED".equals(normalized)
+                || "CANCELLED".equals(normalized);
+    }
+
     public static TaskData taskDataForOfflineRollback(ParseJob parseJob, FileRecord fileRecord) {
         TaskData taskData = new TaskData();
         taskData.setFileRecord(fileRecord);
         taskData.setParseJob(parseJob);
-        if (hasFillStageStarted(parseJob, null)) {
+        taskData.setOfflineRollback(true);
+        if (stageNeedsOfflineRollback(parseJob != null ? parseJob.getFillStatus() : null)) {
             taskData.setFillCommandEntered(true);
         }
         return taskData;

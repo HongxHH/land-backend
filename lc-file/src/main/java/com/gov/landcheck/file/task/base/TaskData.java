@@ -104,6 +104,11 @@ public class TaskData {
     private boolean fillCommandEntered;
 
     /**
+     * 是否为仅依赖持久化 ParseJob 状态的离线回滚（崩溃恢复 / 任务已不在线程池）。
+     */
+    private boolean offlineRollback;
+
+    /**
      * 回填前是否已存在合同记录（用于 Fill 失败时恢复快照或删除新建记录）
      */
     private boolean preFillContractExisted;
