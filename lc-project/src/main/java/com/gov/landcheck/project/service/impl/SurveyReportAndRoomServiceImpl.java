@@ -203,10 +203,7 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             }
             String roomLevel = RoomInfoValidator.normalizeKeyPart(createDTO.getRoomLevel());
             String roomNumber = RoomInfoValidator.normalizeKeyPart(createDTO.getRoomNumber());
-            ValidationResult validation = RoomInfoValidator.validateRoom(
-                    roomLevel, roomNumber,
-                    createDTO.getBuildingArea(), createDTO.getInnerArea(),
-                    createDTO.getBalconyArea(), createDTO.getSharedArea());
+            ValidationResult validation = RoomInfoValidator.validateIdentity(roomLevel, roomNumber);
             if (!validation.isValid()) {
                 return AjaxJson.getError(validation.getErrorMessage());
             }
