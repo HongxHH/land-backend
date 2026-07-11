@@ -41,6 +41,17 @@ public class SurveyReportInfoUpdateDTO {
     @Schema(description = "校验出错原因", example = "建筑面积总和不一致")
     private String verificationErrorReason;
 
+    @Schema(description = "OCR 建筑面积合计（㎡）", example = "10000.00")
+    private BigDecimal roomInfoBuildingAreaSumFromOcr;
+
+    @Schema(description = "OCR 套内面积合计（㎡）", example = "8000.00")
+    private BigDecimal roomInfoInnerAreaSumFromOcr;
+
+    @Schema(description = "OCR 阳台面积合计（㎡）", example = "500.00")
+    private BigDecimal roomInfoBalconyAreaSumFromOcr;
+
+    @Schema(description = "OCR 分摊面积合计（㎡）", example = "1500.00")
+    private BigDecimal roomInfoSharedAreaSumFromOcr;
 
     @Schema(description = "备注")
     private String remark;

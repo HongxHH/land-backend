@@ -162,12 +162,29 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             }
             evictBeforeWrite(directKeys);
             mongoTemplate.updateFirst(query, update, SurveyReportInfo.class);
+            if (hasOcrSumUpdate(updateDTO)) {
+                SurveyReportInfo refreshed = mongoTemplate.findOne(query, SurveyReportInfo.class);
+                if (refreshed != null) {
+                    // OCR 合计变更只需重跑校验，无需重算用途并回写全部户室
+                    ValidationResult result = calculationService.validateSurveyReport(refreshed);
+                    refreshed.setIsVerified(result.isValid() ? 1 : 0);
+                    refreshed.setVerificationErrorReason(result.getErrorMessage());
+                    mongoTemplate.save(refreshed);
+                }
+            }
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("实测报告更新成功");
         } catch (Exception e) {
             log.error("Failed to update survey report", e);
             return AjaxJson.getError("Failed to update survey report");
         }
+    }
+
+    private static boolean hasOcrSumUpdate(SurveyReportInfoUpdateDTO updateDTO) {
+        return updateDTO.getRoomInfoBuildingAreaSumFromOcr() != null
+                || updateDTO.getRoomInfoInnerAreaSumFromOcr() != null
+                || updateDTO.getRoomInfoBalconyAreaSumFromOcr() != null
+                || updateDTO.getRoomInfoSharedAreaSumFromOcr() != null;
     }
 
     @Override
