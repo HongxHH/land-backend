@@ -1,0 +1,150 @@
+server:
+  port: 8082
+  address: 0.0.0.0
+
+debug: false
+
+spring:
+  profiles:
+    default: local
+  threads:
+    virtual:
+      enabled: true
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 1000MB
+      enabled: true
+  data:
+    mongodb:
+      database: landcheck
+      uri: ${LANDCHECK_MONGODB_URI:mongodb://landcheck_user:123@localhost:27017/landcheck?authSource=landcheck&retryWrites=false&replicaSet=rs0}
+      pool:
+        max-size: 200
+        min-size: 20
+        max-idle-time-ms: 60000
+        max-connection-life-time-ms: 0
+        max-wait-time-ms: 5000
+        wait-queue-timeout-ms: 5000
+    redis:
+      host: ${LANDCHECK_REDIS_HOST:localhost}
+      database: 0
+      port: ${LANDCHECK_REDIS_PORT:6379}
+      password: ${LANDCHECK_REDIS_PASSWORD:123}
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  packages-to-scan:
+    - com.gov.landcheck.start
+    - com.gov.landcheck.file
+    - com.gov.landcheck.user
+    - com.gov.landcheck.core
+    - com.gov.landcheck.project
+
+sa-token:
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+  is-read-header: true
+  is-read-cookie: true
+
+logging:
+  level:
+    root: INFO
+    com.gov.landcheck: DEBUG
+    org.apache.pdfbox: ERROR
+    org.apache.fontbox: ERROR
+  file:
+    path: ${LANDCHECK_LOG_DIR:./logs}
+
+landcheck:
+  security:
+    anon-paths:
+      - /error
+      - /auth/login
+      - /auth/register
+      - /auth/user-types
+      - /v3/api-docs/**
+      - /swagger-ui
+      - /swagger-ui/**
+      - /swagger-ui.html
+      - /doc.html
+      - /webjars/**
+      - /favicon.ico
+    rate-limit:
+      enabled: true
+      per-ip-per-second: 100
+      per-user-per-window: 3
+      user-window-seconds: 1
+      skip-path-prefixes:
+        - /webjars/
+        - /swagger-ui
+        - /v3/api-docs
+        - /doc.html
+        - /favicon.ico
+        - /error
+  rocketmq:
+    enabled: true
+    serializer: json
+    producer:
+      send-timeout-ms: 5000
+      retry-times-when-send-failed: 3
+    consumer:
+      consume-thread-min: 4
+      consume-thread-max: 16
+  mq:
+    rate-limit:
+      enabled: true
+      tps: 5
+    idempotent:
+      enabled: true
+      ttl-seconds: 86400
+      key-prefix: "mq:idempotent:"
+  file:
+    preprocess:
+      conda-env: SR
+    processing:
+      upload-pool:
+        core-size: 4
+        max-size: 4
+        queue-capacity: 0
+      parse-pool:
+        core-size: 2
+        max-size: 2
+        queue-capacity: 512
+      thumbnail-dpi: 120
+      gate-acquire-timeout-ms: 30000
+      auto-parse:
+        enabled: true
+        retry-interval-ms: 30000
+        retry-batch-size: 16
+      concurrency:
+        max-parse-concurrency-limit: 16
+        max-python-preprocess: 1
+  ocr:
+    api:
+      url: http://localhost:8080/layout-parsing
+      timeout: 300000
+  llm:
+    api:
+      url: https://ark.cn-beijing.volces.com/api/v3
+      key: ${LANDCHECK_LLM_API_KEY:}
+      timeout-seconds: 240
+      model: doubao-seed-2-0-pro-260215
+      vision-model: doubao-seed-2-0-pro-260215
+
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: lc-producer-group
+    send-message-timeout: 5000
+    retry-times-when-send-failed: 3

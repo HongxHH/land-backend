@@ -1,0 +1,121 @@
+name: landcheck
+
+services:
+  mongodb:
+    image: mongo:8.0.13
+    container_name: mongodb
+    restart: always
+    command: --replSet rs0 --bind_ip_all --port 27017
+    ports:
+      - "27017:27017"
+    volumes:
+      - E:\dev\Docker\mongo:/data/db # 挂载你原来的数据目录
+    environment:
+      TZ: Asia/Shanghai
+      # 注意：这里不要设置MONGO_INITDB_ROOT_USERNAME和MONGO_INITDB_ROOT_PASSWORD
+      # 因为副本集初始化会重置admin数据库，这些环境变量会失效
+
+  redis:
+    image: redis:8.2.1
+    container_name: landcheck-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - E:\dev\Docker\redis\data:/data
+      - E:\dev\Docker\redis\redis.conf:/etc/redis/redis.conf
+    command: redis-server /etc/redis/redis.conf
+    environment:
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "123", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  rmqnamesrv:
+    image: apache/rocketmq:5.1.0
+    container_name: landcheck-rmqnamesrv
+    restart: always
+    privileged: true
+    networks:
+      - rocketmq
+    ports:
+      - "9876:9876"
+    volumes:
+      - E:\dev\Docker\rocketmq\nameserver\logs:/home/rocketmq/logs
+    command: sh mqnamesrv
+    environment:
+      TZ: Asia/Shanghai
+
+  rmqbroker:
+    image: apache/rocketmq:5.1.0
+    container_name: landcheck-rmqbroker
+    restart: always
+    privileged: true
+    networks:
+      - rocketmq
+    depends_on:
+      - rmqnamesrv
+    ports:
+      - "10911:10911"
+      - "10909:10909"
+    volumes:
+      - E:\dev\Docker\rocketmq\broker\logs:/root/logs
+      - E:\dev\Docker\rocketmq\broker\store:/root/store
+      - E:\dev\Docker\rocketmq\broker\conf\broker.conf:/home/rocketmq/broker.conf
+    environment:
+      TZ: Asia/Shanghai
+      NAMESRV_ADDR: rmqnamesrv:9876
+    command: sh mqbroker -c /home/rocketmq/broker.conf
+
+  paddleocr-vl-api:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:${API_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-vl-api
+    ports:
+      - 8080:8080
+    depends_on:
+      paddleocr-vlm-server:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: [ "0" ]
+              capabilities: [ gpu ]
+    shm_size: 64g
+    user: root
+    restart: unless-stopped
+    volumes:
+      - ../../../TestDeploy/config/pipeline_config_vllm.yaml:/home/paddleocr/pipeline_config_vllm.yaml
+    environment:
+      - VLM_BACKEND=${VLM_BACKEND:-vllm}
+      - DISABLE_MODEL_SOURCE_CHECK=True
+    command: /bin/bash -c "paddlex --serve --pipeline /home/paddleocr/pipeline_config_${VLM_BACKEND}.yaml"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8080/health || exit 1" ]
+
+  paddleocr-vlm-server:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-${VLM_BACKEND}-server:${VLM_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-vlm-server
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: [ "0" ]
+              capabilities: [ gpu ]
+
+    shm_size: 64g
+    user: root
+    restart: unless-stopped
+    command: paddleocr genai_server --model_name PaddleOCR-VL-1.6-0.9B --host 0.0.0.0 --port 8080 --backend vllm
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8080/health || exit 1" ]
+      start_period: 300s
+
+networks:
+  rocketmq:
+    name: landcheck-rocketmq

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.gov.landcheck</groupId>
+        <artifactId>landcheck</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>lc-start</artifactId>
+    <packaging>jar</packaging>
+
+
+    <properties>
+        <!-- 主类地址，一定要配置，否则打包时运行会出错 -->
+        <java.run.main.class>com.gov.landcheck.start.LandCheckApplication</java.run.main.class>
+    </properties>
+
+    <!-- 业务模块必须显式依赖，否则运行时 classpath 无 Controller/Service，接口全部为 404 -->
+    <dependencies>
+        <dependency>
+            <groupId>com.gov.landcheck</groupId>
+            <artifactId>lc-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.gov.landcheck</groupId>
+            <artifactId>lc-user</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.gov.landcheck</groupId>
+            <artifactId>lc-file</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.gov.landcheck</groupId>
+            <artifactId>lc-project</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <!-- 基础搭建描述 -->
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+        <!--        <resources>-->
+        <!--            <resource>-->
+        <!--                <directory>src/main/resources</directory>-->
+        <!--                <filtering>false</filtering>-->
+        <!--                <includes>-->
+        <!--                    <include>lang/*</include>-->
+        <!--                    <include>**/*</include>-->
+        <!--                </includes>-->
+        <!--            </resource>-->
+        <!--        </resources>-->
+    </build>
+
+</project>

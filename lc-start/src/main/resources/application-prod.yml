@@ -1,0 +1,35 @@
+# 生产 profile：敏感项须通过环境变量注入，Swagger 关闭
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    com.gov.landcheck: INFO
+  file:
+    path: ${LANDCHECK_LOG_DIR:./logs}
+  logback:
+    rollingpolicy:
+      max-file-size: 100MB
+      max-history: 30
+
+spring:
+  data:
+    mongodb:
+      uri: ${LANDCHECK_MONGODB_URI}
+    redis:
+      password: ${LANDCHECK_REDIS_PASSWORD:}
+
+landcheck:
+  security:
+    anon-paths:
+      - /error
+      - /auth/login
+      - /auth/register
+      - /auth/user-types
+      - /favicon.ico
+  llm:
+    api:
+      key: ${LANDCHECK_LLM_API_KEY}
