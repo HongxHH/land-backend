@@ -36,12 +36,16 @@ public class GridFSUtils {
      * @return true 如果文件存在，false 如果不存在
      */
     public boolean exists(String gridfsId) {
+        if (!ObjectId.isValid(gridfsId)) {
+            log.warn("GridFS 文件ID格式无效: gridfsId={}", gridfsId);
+            return false;
+        }
         try {
             GridFSFile fsFile = gridFsBucket.find(new Document("_id", new ObjectId(gridfsId))).first();
             return fsFile != null;
         } catch (Exception e) {
-            log.warn("检查 GridFS 文件存在性失败: gridfsId={}, error={}", gridfsId, e.getMessage());
-            return false;
+            log.warn("检查 GridFS 文件存在性失败: gridfsId={}, error={}", gridfsId, e.getMessage(), e);
+            throw new IllegalStateException("GridFS 文件存在性检查失败，请稍后再试", e);
         }
     }
 
