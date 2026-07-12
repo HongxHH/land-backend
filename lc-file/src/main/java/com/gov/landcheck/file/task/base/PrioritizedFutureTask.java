@@ -18,6 +18,8 @@ public class PrioritizedFutureTask extends FutureTask<Void> implements Comparabl
     private final long submitTime;
     private final long submitEpochMillis;
     private final String taskId;
+    private volatile boolean actuallyRunning;
+    private volatile Thread executingThread;
 
     public PrioritizedFutureTask(Task task, TaskPriority priority, String taskId) {
         super(ContextPropagating.wrap(task::run), null);
@@ -29,11 +31,36 @@ public class PrioritizedFutureTask extends FutureTask<Void> implements Comparabl
     }
 
     @Override
+    public void run() {
+        actuallyRunning = true;
+        executingThread = Thread.currentThread();
+        try {
+            super.run();
+        } finally {
+            executingThread = null;
+            actuallyRunning = false;
+        }
+    }
+
+    @Override
     public int compareTo(PrioritizedFutureTask other) {
         int priorityCompare = Integer.compare(this.priority.getValue(), other.priority.getValue());
         if (priorityCompare != 0) {
             return priorityCompare;
         }
         return Long.compare(this.submitTime, other.submitTime);
+    }
+
+    public boolean isActuallyRunning() {
+        return actuallyRunning;
+    }
+
+    public boolean interruptIfRunning() {
+        Thread thread = executingThread;
+        if (thread == null) {
+            return false;
+        }
+        thread.interrupt();
+        return true;
     }
 }

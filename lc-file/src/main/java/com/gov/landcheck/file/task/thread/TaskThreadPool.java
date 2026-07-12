@@ -193,11 +193,23 @@ public class TaskThreadPool {
             return false;
         }
 
-        boolean cancelled = future.cancel(true);
+        if (prioritizedTask.isActuallyRunning()) {
+            prioritizedTask.getTask().cancel(reason);
+            boolean interrupted = prioritizedTask.interruptIfRunning();
+            log.info("运行中任务已提交取消请求: taskId={}, reason={}, interrupted={}", taskId, reason, interrupted);
+            return true;
+        }
+
+        boolean cancelled = future.cancel(false);
 
         if (cancelled) {
             prioritizedTask.getTask().cancel(reason);
             cleanupTask(prioritizedTask.getTask(), taskId);
+        } else if (prioritizedTask.isActuallyRunning()) {
+            prioritizedTask.getTask().cancel(reason);
+            boolean interrupted = prioritizedTask.interruptIfRunning();
+            log.info("任务启动竞态中已提交取消请求: taskId={}, reason={}, interrupted={}", taskId, reason, interrupted);
+            return true;
         } else {
             log.warn("任务取消失败，可能任务已完成: taskId={}", taskId);
         }
@@ -211,6 +223,10 @@ public class TaskThreadPool {
     public boolean isTaskRunning(String taskId) {
         if (taskId == null) {
             return false;
+        }
+        PrioritizedFutureTask prioritizedTask = activeTasks.get(taskId);
+        if (prioritizedTask != null && prioritizedTask.isActuallyRunning()) {
+            return true;
         }
         Future<?> future = taskFutures.get(taskId);
         return future != null && !future.isDone();
