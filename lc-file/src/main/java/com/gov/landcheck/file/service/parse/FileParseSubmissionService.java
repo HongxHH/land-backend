@@ -118,8 +118,6 @@ public class FileParseSubmissionService {
                 return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "该文件已不存在，请重新上传后再试");
             }
 
-            resetBusinessStateBeforeParse(fileRecord);
-
             rollbackState = fileRecord.getFileState();
             acquired = false;
             if (fileRecordId != null) {
@@ -137,6 +135,9 @@ public class FileParseSubmissionService {
             if (!acquired) {
                 return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "文件解析任务已在进行中");
             }
+
+            resetBusinessStateBeforeParse(fileRecord);
+
             fileRecord.setFileState(FileStateEnum.PENDING);
             fileRecord.setAutoParseQueuedAt(null);
             fileRecord.setAutoParseSuppressed(false);
