@@ -1,10 +1,11 @@
 package com.gov.landcheck.file.task.processor.receiver;
 
+import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -16,9 +17,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.bson.Document;
 import org.bson.types.ObjectId;
-import org.springframework.data.mongodb.gridfs.GridFsTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.gridfs.GridFsTemplate;
 import org.springframework.stereotype.Service;
 
 import com.gov.landcheck.file.config.FileProcessingConfig;
@@ -49,6 +50,8 @@ public class PdfPreReceiver {
     private static final int PYTHON_TIMEOUT_SECONDS = 300; // 5分钟超时
     private static final int WAIT_MAX_TIMEOUT = 5; // 最大等待时间5秒
     private static final int DESTROY_WAIT_SECONDS = 5;
+    /** 失败日志/异常消息中保留的 Python 输出上限，避免撑爆日志 */
+    private static final int PYTHON_OUTPUT_LOG_LIMIT = 4000;
 
     @Value("${landcheck.file.preprocess.conda-env:SR}")
     private String preprocessCondaEnv;
@@ -139,7 +142,6 @@ public class PdfPreReceiver {
             throws Exception {
         Path scriptPath = findPythonScript();
 
-        StringBuilder args = new StringBuilder();
         String pythonCommand = String.format(
                 "conda activate %s && python \"%s\" --input \"%s\" --output \"%s\" --dpi 300"
                         + " --red-diff-thresh 30 --red-min-r 80 --protect-gray-thresh 80 --morph-ksize 3",
@@ -150,6 +152,7 @@ public class PdfPreReceiver {
 
         Process process = pb.start();
 
+        ByteArrayOutputStream capturedOutput = new ByteArrayOutputStream();
         ExecutorService outputReader = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "PdfPreprocess-OutputReader");
             t.setDaemon(true);
@@ -157,7 +160,7 @@ public class PdfPreReceiver {
         });
         outputReader.submit(() -> {
             try (InputStream in = process.getInputStream()) {
-                in.transferTo(OutputStream.nullOutputStream());
+                in.transferTo(capturedOutput);
             } catch (IOException e) {
                 log.debug("读取 Python 合并输出流结束: {}", e.getMessage());
             }
@@ -165,14 +168,15 @@ public class PdfPreReceiver {
 
         long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(PYTHON_TIMEOUT_SECONDS);
         boolean cancelledByTask = false;
+        boolean timedOut = false;
 
         try {
             while (!process.waitFor(WAIT_MAX_TIMEOUT, TimeUnit.SECONDS)) {
                 if (System.nanoTime() >= deadlineNanos) {
                     process.destroyForcibly();
                     process.waitFor(DESTROY_WAIT_SECONDS, TimeUnit.SECONDS);
-                    throw new TaskException(TaskException.ErrorCode.PREPROCESS_TIMEOUT,
-                            "PREPROCESS", null, null, "Python脚本执行超时");
+                    timedOut = true;
+                    break;
                 }
                 if (taskData != null && taskData.getTask() != null && taskData.getTask().shouldStop()) {
                     cancelledByTask = true;
@@ -190,6 +194,7 @@ public class PdfPreReceiver {
                     if (System.nanoTime() >= deadlineNanos) {
                         process.destroyForcibly();
                         process.waitFor(DESTROY_WAIT_SECONDS, TimeUnit.SECONDS);
+                        timedOut = true;
                         break;
                     }
                 } catch (InterruptedException ie) {
@@ -208,17 +213,28 @@ public class PdfPreReceiver {
             outputReader.shutdownNow();
         }
 
+        String pythonOutput = truncateForLog(capturedOutput.toString(StandardCharsets.UTF_8).trim());
+
+        if (timedOut) {
+            logPythonOutputOnFailure("Python脚本执行超时", pythonOutput);
+            throw new TaskException(TaskException.ErrorCode.PREPROCESS_TIMEOUT,
+                    "PREPROCESS", null, null,
+                    "Python脚本执行超时" + formatPythonOutputSuffix(pythonOutput));
+        }
+
         int exitCode = process.exitValue();
         if (exitCode != 0) {
+            logPythonOutputOnFailure("Python脚本执行失败，退出码=" + exitCode, pythonOutput);
             throw new TaskException(TaskException.ErrorCode.PREPROCESS_FAILED,
                     "PREPROCESS", null, null,
-                    "Python脚本执行失败，退出码: " + exitCode);
+                    "Python脚本执行失败，退出码: " + exitCode + formatPythonOutputSuffix(pythonOutput));
         }
 
         if (!Files.exists(outputPdfPath)) {
+            logPythonOutputOnFailure("Python脚本未生成输出文件: " + outputPdfPath, pythonOutput);
             throw new TaskException(TaskException.ErrorCode.PREPROCESS_FAILED,
                     "PREPROCESS", null, null,
-                    "Python脚本未生成输出文件: " + outputPdfPath);
+                    "Python脚本未生成输出文件: " + outputPdfPath + formatPythonOutputSuffix(pythonOutput));
         }
 
         // 曾检测到取消请求，但子进程已正常结束且产物存在：按成功处理，避免误抛“任务已取消”
@@ -226,6 +242,31 @@ public class PdfPreReceiver {
             log.info("预处理过程中曾出现取消/中断信号，但子进程已正常完成且输出文件存在，按成功路径继续: output={}",
                     outputPdfPath);
         }
+    }
+
+    private static String truncateForLog(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        if (text.length() <= PYTHON_OUTPUT_LOG_LIMIT) {
+            return text;
+        }
+        return text.substring(0, PYTHON_OUTPUT_LOG_LIMIT) + "...(truncated)";
+    }
+
+    private static String formatPythonOutputSuffix(String pythonOutput) {
+        if (pythonOutput == null || pythonOutput.isEmpty()) {
+            return "（无脚本输出）";
+        }
+        return "，输出: " + pythonOutput;
+    }
+
+    private void logPythonOutputOnFailure(String reason, String pythonOutput) {
+        if (pythonOutput == null || pythonOutput.isEmpty()) {
+            log.error("{}（Python 无 stdout/stderr 输出）", reason);
+            return;
+        }
+        log.error("{}，Python 输出:\n{}", reason, pythonOutput);
     }
 
     /**
