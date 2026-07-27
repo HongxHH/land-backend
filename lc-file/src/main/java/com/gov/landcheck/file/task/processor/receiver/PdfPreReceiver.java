@@ -4,6 +4,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -254,10 +255,25 @@ public class PdfPreReceiver {
             }
         }
 
+        // 兼容部署态：回退到 JAR 同目录
+        try {
+            URL location = PdfPreReceiver.class.getProtectionDomain().getCodeSource().getLocation();
+            if (location != null) {
+                Path codePath = Path.of(location.toURI());
+                Path jarDir = Files.isRegularFile(codePath) ? codePath.getParent() : codePath;
+                Path externalScript = jarDir.resolve(PYTHON_SCRIPT_NAME);
+                if (Files.isRegularFile(externalScript)) {
+                    return externalScript.toAbsolutePath();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("JAR同目录查找脚本失败: {}", e.getMessage());
+        }
+
         throw new TaskException(TaskException.ErrorCode.PREPROCESS_FAILED,
                 "PREPROCESS", null, null,
                 "找不到Python脚本文件: " + PYTHON_SCRIPT_NAME
-                        + "。请确认该脚本已放入 lc-start/src/main/resources");
+                        + "。请确认该脚本已放入 classpath、lc-start/src/main/resources，或与 JAR 同目录");
     }
 
     public void deleteExistingPreprocessResult(String originalGridfsId) {
