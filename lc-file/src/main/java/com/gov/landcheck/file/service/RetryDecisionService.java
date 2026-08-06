@@ -12,6 +12,8 @@ import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.config.global.RetryConfig;
 import com.gov.landcheck.core.config.logging.ContextPropagating;
+import com.gov.landcheck.core.enums.FileStateEnum;
+import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.config.FileRetrySchedulerConfig;
 import com.gov.landcheck.file.task.base.TaskFailureClassifier;
 
@@ -142,8 +144,18 @@ public class RetryDecisionService {
         String reason = "retry_" + stage + "_failed: " + truncate(detail, 800);
         parseJob.setRetryReason(reason);
         parseJob.setNextRetryAt(null);
+        parseJob.setJobStatus(ParseJobStateEnum.FAILED);
+        parseJob.setErrorMessage(reason);
         try {
             mongoTemplate.save(parseJob);
+            if (fileRecord != null) {
+                fileRecord.setFileState(FileStateEnum.PARSE_FAIL);
+                fileRecord.setParseMessage(reason);
+                if (parseJob.getId() != null) {
+                    fileRecord.setParseJobId(parseJob.getId());
+                }
+                mongoTemplate.save(fileRecord);
+            }
         } catch (Exception ex) {
             log.error("回写重试失败状态落库异常: parseJobId={}, fileId={}, error={}",
                     parseJob.getId(), fileRecord != null ? fileRecord.getId() : null, ex.getMessage(), ex);

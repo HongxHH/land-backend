@@ -237,6 +237,11 @@ public class ParseFileTask implements Task {
         if (cancelled) {
             return;
         }
+        if (retryTriggered) {
+            log.info("ParseFileTask fallback 跳过（任务已触发重试）: fileId={}, taskId={}",
+                    taskData.getFileRecord().getId(), getTaskId());
+            return;
+        }
         log.warn("ParseFileTask fallback: fileId={}, taskId={}", taskData.getFileRecord().getId(), getTaskId());
         parseFileExecutor.rollback(taskData);
     }
