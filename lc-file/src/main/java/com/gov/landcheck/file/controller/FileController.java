@@ -255,6 +255,8 @@ public class FileController {
                 return AjaxJson.get(404, "解析任务不存在");
             }
             return AjaxJson.getSuccess("获取解析流水线成功").setData(detail);
+        } catch (SecurityException e) {
+            return AjaxJson.getNotJur(e.getMessage());
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {

@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -52,6 +53,7 @@ public class PdfPreReceiver {
     private static final int DESTROY_WAIT_SECONDS = 5;
     /** 失败日志/异常消息中保留的 Python 输出上限，避免撑爆日志 */
     private static final int PYTHON_OUTPUT_LOG_LIMIT = 4000;
+    private static final int PYTHON_OUTPUT_CAPTURE_LIMIT_BYTES = 16 * 1024;
 
     @Value("${landcheck.file.preprocess.conda-env:SR}")
     private String preprocessCondaEnv;
@@ -152,7 +154,7 @@ public class PdfPreReceiver {
 
         Process process = pb.start();
 
-        ByteArrayOutputStream capturedOutput = new ByteArrayOutputStream();
+        BoundedOutputCapture capturedOutput = new BoundedOutputCapture(PYTHON_OUTPUT_CAPTURE_LIMIT_BYTES);
         ExecutorService outputReader = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "PdfPreprocess-OutputReader");
             t.setDaemon(true);
@@ -213,7 +215,7 @@ public class PdfPreReceiver {
             outputReader.shutdownNow();
         }
 
-        String pythonOutput = truncateForLog(capturedOutput.toString(StandardCharsets.UTF_8).trim());
+        String pythonOutput = truncateForLog(capturedOutput.toLogString().trim());
 
         if (timedOut) {
             logPythonOutputOnFailure("Python脚本执行超时", pythonOutput);
@@ -267,6 +269,52 @@ public class PdfPreReceiver {
             return;
         }
         log.error("{}，Python 输出:\n{}", reason, pythonOutput);
+    }
+
+    static final class BoundedOutputCapture extends OutputStream {
+        private final ByteArrayOutputStream delegate;
+        private final int limitBytes;
+        private long discardedBytes;
+
+        BoundedOutputCapture(int limitBytes) {
+            this.limitBytes = Math.max(0, limitBytes);
+            this.delegate = new ByteArrayOutputStream(this.limitBytes);
+        }
+
+        @Override
+        public synchronized void write(int b) {
+            if (delegate.size() < limitBytes) {
+                delegate.write(b);
+            } else {
+                discardedBytes++;
+            }
+        }
+
+        @Override
+        public synchronized void write(byte[] b, int off, int len) {
+            if (b == null) {
+                return;
+            }
+            if (len <= 0) {
+                return;
+            }
+            int available = Math.max(0, limitBytes - delegate.size());
+            int toWrite = Math.min(available, len);
+            if (toWrite > 0) {
+                delegate.write(b, off, toWrite);
+            }
+            if (len > toWrite) {
+                discardedBytes += len - toWrite;
+            }
+        }
+
+        synchronized String toLogString() {
+            String text = delegate.toString(StandardCharsets.UTF_8);
+            if (discardedBytes <= 0) {
+                return text;
+            }
+            return text + "...(truncated " + discardedBytes + " bytes)";
+        }
     }
 
     /**

@@ -95,11 +95,10 @@ public final class TaskFailureClassifier {
                     OCR_TIMEOUT, TASK_TIMEOUT, TASK_RESOURCE_ERROR ->
                 "timeout";
             case OCR_API_ERROR, NETWORK_ERROR -> "network";
-            case DATABASE_ERROR -> "database";
+            case DATABASE_ERROR, FILL_FAILED, VALIDATE_FAILED -> "database";
             case IO_ERROR -> "io";
             case PREPROCESS_FAILED, OCR_INVALID_INPUT, OCR_FAILED,
-                    PARSE_FAILED, PARSE_DATA_INVALID,
-                    FILL_FAILED, VALIDATE_FAILED ->
+                    PARSE_FAILED, PARSE_DATA_INVALID ->
                 "parse";
             case TASK_CANCELLED, TASK_STATE_INVALID, SYSTEM_ERROR -> "unknown";
         };

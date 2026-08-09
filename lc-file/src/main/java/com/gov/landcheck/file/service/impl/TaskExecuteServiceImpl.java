@@ -24,6 +24,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 
+import com.gov.landcheck.core.audit.FileOperationAuthorization;
 import com.gov.landcheck.core.audit.OperatorContext;
 import com.gov.landcheck.core.config.logging.TraceContext;
 import com.gov.landcheck.core.bo.dto.SystemRuntimeStatusDTO;
@@ -305,6 +306,9 @@ public class TaskExecuteServiceImpl implements ITaskExecuteService {
             return null;
         }
         FileRecord fileRecord = mongoTemplate.findById(job.getFileRecordId(), FileRecord.class);
+        if (!FileOperationAuthorization.canMutateFile(fileRecord)) {
+            throw new SecurityException("无权查看解析流水线");
+        }
         return parseProgressAssembler.fromParseJob(job, fileRecord);
     }
 

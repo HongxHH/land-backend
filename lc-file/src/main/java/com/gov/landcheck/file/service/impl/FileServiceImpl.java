@@ -355,9 +355,12 @@ public class FileServiceImpl implements FileService {
         boolean poolCancelled = false;
         if (wasRunningInPool) {
             poolCancelled = taskExecuteService.cancelParseTask(parseJob.getTaskId(), reason);
-        } else {
+        } else if (targetsCurrentJob) {
             taskExecuteService.rollbackParseJob(parseJob, fileRecord);
             log.info("任务未在线程池运行，已回滚中间数据: taskId={}, fileId={}", parseJob.getTaskId(), fileId);
+        } else {
+            log.info("历史解析任务未在线程池运行，仅标记取消，跳过文件级业务数据回滚: taskId={}, fileId={}, latestParseJobId={}",
+                    parseJob.getTaskId(), fileId, latestJob != null ? latestJob.getId() : null);
         }
 
         // 6. 更新文件状态（仅当取消的是当前最新任务时）
