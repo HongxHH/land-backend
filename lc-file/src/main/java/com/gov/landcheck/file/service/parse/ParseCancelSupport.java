@@ -24,9 +24,11 @@ public final class ParseCancelSupport {
         if (parseJob == null) {
             return false;
         }
+        if (!parseJob.isCancelRequested() || !isUserInitiatedReason(parseJob.getCancelReason())) {
+            return false;
+        }
         return ParseJobStateEnum.CANCELLED.equals(parseJob.getJobStatus())
-                && parseJob.isCancelRequested()
-                && isUserInitiatedReason(parseJob.getCancelReason());
+                || ParseJobStateEnum.FAILED.equals(parseJob.getJobStatus());
     }
 
     public static boolean isUserInitiatedReason(String reason) {

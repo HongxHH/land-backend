@@ -40,7 +40,8 @@ public class GlobalParseEnqueueService {
 
     public BulkParseEnqueueResultDTO enqueuePendingAndFailed() {
         Query query = new Query(Criteria.where("file_state")
-                .in(FileStateEnum.WAITING_PARSE, FileStateEnum.PARSE_FAIL))
+                .in(FileStateEnum.WAITING_PARSE, FileStateEnum.PARSE_FAIL)
+                .and("auto_parse_suppressed").ne(true))
                 .with(Sort.by(Sort.Direction.ASC, "update_time"));
         List<FileRecord> candidates = mongoTemplate.find(query, FileRecord.class);
 
@@ -55,6 +56,11 @@ public class GlobalParseEnqueueService {
                 break;
             }
             if (fileRecord.getId() == null || !FileContextType.isAutoParseContext(fileRecord.getFileContextType())) {
+                continue;
+            }
+            if (Boolean.TRUE.equals(fileRecord.getAutoParseSuppressed())) {
+                skipped++;
+                log.debug("批量入队跳过（用户已取消自动解析）: fileId={}", fileRecord.getId());
                 continue;
             }
             ParseJob latestJob = fileParseSubmissionService.findLatestParseJobByFileRecordId(fileRecord.getId());
@@ -98,7 +104,8 @@ public class GlobalParseEnqueueService {
                         FileContextType.SURVEY_REPORT,
                         FileContextType.PLANNING_REVIEW,
                         FileContextType.CAPACITY_INDICATOR,
-                        FileContextType.PROJECT_PARTY_SURVEY_SUMMARY));
+                        FileContextType.PROJECT_PARTY_SURVEY_SUMMARY)
+                .and("auto_parse_suppressed").ne(true));
         return (int) mongoTemplate.count(query, FileRecord.class);
     }
 }
