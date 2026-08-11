@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -147,7 +148,7 @@ public class PdfPreReceiver {
                         + " --red-diff-thresh 30 --red-min-r 80 --protect-gray-thresh 80 --morph-ksize 3",
                 preprocessCondaEnv, scriptPath, inputPdfPath, outputPdfPath);
 
-        ProcessBuilder pb = new ProcessBuilder("cmd", "/c", pythonCommand);
+        ProcessBuilder pb = createPythonProcessBuilder(pythonCommand);
         pb.redirectErrorStream(true);
 
         Process process = pb.start();
@@ -267,6 +268,29 @@ public class PdfPreReceiver {
             return;
         }
         log.error("{}，Python 输出:\n{}", reason, pythonOutput);
+    }
+
+    static ProcessBuilder createPythonProcessBuilder(String pythonCommand) {
+        return createPythonProcessBuilder(pythonCommand, System.getProperty("os.name", ""));
+    }
+
+    static ProcessBuilder createPythonProcessBuilder(String pythonCommand, String osName) {
+        if (isWindows(osName)) {
+            return new ProcessBuilder("cmd", "/c", pythonCommand);
+        }
+        return new ProcessBuilder(resolveUnixShell(), "-lc", pythonCommand);
+    }
+
+    private static boolean isWindows(String osName) {
+        return osName != null && osName.toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private static String resolveUnixShell() {
+        Path bash = Path.of("/bin/bash");
+        if (Files.isExecutable(bash)) {
+            return bash.toString();
+        }
+        return "/bin/sh";
     }
 
     /**
