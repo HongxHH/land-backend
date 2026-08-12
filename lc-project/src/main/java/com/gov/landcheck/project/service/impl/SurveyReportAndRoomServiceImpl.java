@@ -273,9 +273,12 @@ public class SurveyReportAndRoomServiceImpl implements SurveyReportAndRoomServic
             }
             String roomLevel = mergeRoomString(updateDTO.getRoomLevel(), existingRoom.getRoomLevel());
             String roomNumber = mergeRoomString(updateDTO.getRoomNumber(), existingRoom.getRoomNumber());
-            if (StringUtils.hasText(roomLevel) && StringUtils.hasText(roomNumber)
-                    && hasDuplicateRoom(existingRoom.getSurveyReportInfoId(), existingRoom.getId(), roomLevel,
-                            roomNumber)) {
+            ValidationResult validation = RoomInfoValidator.validateIdentity(roomLevel, roomNumber);
+            if (!validation.isValid()) {
+                return AjaxJson.getError(validation.getErrorMessage());
+            }
+            if (hasDuplicateRoom(existingRoom.getSurveyReportInfoId(), existingRoom.getId(), roomLevel,
+                    roomNumber)) {
                 return AjaxJson.getError(String.format("该实测报告下已存在楼层「%s」房号「%s」的户室", roomLevel, roomNumber));
             }
             Update update = DynamicUpdateHelper.buildDynamicUpdate(updateDTO);
