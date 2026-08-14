@@ -2,6 +2,8 @@ package com.gov.landcheck.file.config;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
@@ -78,11 +80,49 @@ public class ParseJobStateRecovery implements ApplicationRunner {
         long pendingCount = mongoTemplate.updateMulti(pendingQuery, pendingUpdate, FileRecord.class).getModifiedCount();
         log.debug("已将 {} 个 PENDING 文件恢复为 WAITING_PARSE", pendingCount);
 
-        Query parsingQuery = new Query(Criteria.where("file_state").is(FileStateEnum.PARSING.getCode()));
+        Set<Long> completedParseJobIds = recoverCompletedParsingFileRecords();
+
+        Criteria parsingCriteria = Criteria.where("file_state").is(FileStateEnum.PARSING.getCode());
+        if (!completedParseJobIds.isEmpty()) {
+            parsingCriteria.and("parse_job_id").nin(completedParseJobIds);
+        }
+        Query parsingQuery = new Query(parsingCriteria);
         Update parsingUpdate = new Update()
                 .set("file_state", FileStateEnum.PARSE_FAIL.getCode())
                 .unset("preprocess_gridfs_id");
         long parsingCount = mongoTemplate.updateMulti(parsingQuery, parsingUpdate, FileRecord.class).getModifiedCount();
         log.debug("已将 {} 个 PARSING 文件恢复为 PARSE_FAIL", parsingCount);
+    }
+
+    private Set<Long> recoverCompletedParsingFileRecords() {
+        Query parsingWithJobQuery = new Query(Criteria.where("file_state").is(FileStateEnum.PARSING.getCode())
+                .and("parse_job_id").ne(null));
+        List<FileRecord> parsingRecords = mongoTemplate.find(parsingWithJobQuery, FileRecord.class);
+        Set<Long> parseJobIds = parsingRecords.stream()
+                .map(FileRecord::getParseJobId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+        if (parseJobIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Query successJobQuery = new Query(Criteria.where("_id").in(parseJobIds)
+                .and("job_status").is(ParseJobStateEnum.SUCCESS.getCode()));
+        Set<Long> successJobIds = mongoTemplate.find(successJobQuery, ParseJob.class).stream()
+                .map(ParseJob::getId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+        if (successJobIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Query restoreQuery = new Query(Criteria.where("file_state").is(FileStateEnum.PARSING.getCode())
+                .and("parse_job_id").in(successJobIds));
+        Update restoreUpdate = new Update()
+                .set("file_state", FileStateEnum.PARSE_COMPLETE.getCode())
+                .unset("auto_parse_queued_at");
+        long restoredCount = mongoTemplate.updateMulti(restoreQuery, restoreUpdate, FileRecord.class).getModifiedCount();
+        log.debug("已将 {} 个 ParseJob 成功但 FileRecord 仍为 PARSING 的文件恢复为 PARSE_COMPLETE", restoredCount);
+        return successJobIds;
     }
 }
