@@ -32,6 +32,77 @@
 
 主类：`com.gov.landcheck.start.LandCheckApplication`（扫描 `com.gov.landcheck`）。
 
+## 架构概览
+
+
+### 系统上下文
+
+```mermaid
+flowchart LR
+  subgraph Clients["客户端"]
+    FE["Vue 前端<br/>land-frontend"]
+  end
+
+  subgraph App["LandCheck 后端 · Spring Boot 3"]
+    API["REST API + Sa-Token"]
+    WS["WebSocket / STOMP"]
+    PARSE["异步解析<br/>Pipeline + 线程池"]
+  end
+
+  subgraph Data["数据与中间件"]
+    MONGO["MongoDB<br/>业务数据 + GridFS"]
+    REDIS["Redis<br/>缓存 / 幂等"]
+    MQ["RocketMQ<br/>解析结果 / 预警"]
+  end
+
+  subgraph Ext["外部服务"]
+    OCR["PaddleOCR<br/>layout-parsing"]
+    LLM["火山方舟 Ark<br/>视觉 / 提取"]
+  end
+
+  FE -->|HTTP satoken| API
+  FE <-->|STOMP| WS
+  API --> PARSE
+  PARSE --> MONGO
+  PARSE --> OCR
+  PARSE --> LLM
+  API --> MONGO
+  API --> REDIS
+  PARSE -->|发通知| MQ
+  MQ --> WS
+```
+
+### 模块依赖
+
+```mermaid
+flowchart TB
+  START["lc-start<br/>启动 / 配置 / 打包"]
+
+  USER["lc-user<br/>登录 · 用户 · 角色"]
+  FILE["lc-file<br/>上传 · GridFS · 解析 · 线程池"]
+  PROJ["lc-project<br/>项目 · 合同 · 实测 · 汇总"]
+
+  CORE["lc-core<br/>实体 · 安全 · MQ · WS · 通用能力"]
+
+  START --> USER
+  START --> FILE
+  START --> PROJ
+  START --> CORE
+
+  USER --> CORE
+  FILE --> CORE
+  PROJ --> CORE
+```
+
+约束：业务模块只依赖 `lc-core`，**彼此不互相依赖**；运行时由 `lc-start` 聚合。
+
+
+### 文件解析流水线 
+
+
+![文件解析流水线](docs/images/03-parse-pipeline.png)
+
+
 ## 本地快速启动
 
 ### 前置条件
@@ -99,10 +170,4 @@ java -Dspring.profiles.active=prod -jar lc-start/target/lc-start-0.0.1-SNAPSHOT.
 - 业务模块必须被 `lc-start` 显式依赖，否则运行时 Controller 会 404。
 - 功能模块只依赖 `lc-core`，禁止模块间循环依赖。
 - 虚拟线程已开启（`spring.threads.virtual.enabled`）。
-- 文件解析是异步的：上传落库后入队，客户端不能取消已发出的后处理。
-
-## 测试
-
-```bash
-mvn test
-```
+- 文件解析是异步的：上传落库后入队；可通过 `POST /file/cancel/{fileId}` 或 `POST /file/task/cancel/{taskId}` 取消。仅当取消的是文件当前绑定的 ParseJob 时，才会做文件级业务回滚与状态回退；取消历史任务只更新该 job 自身状态，不碰 FileRecord 与业务表。
