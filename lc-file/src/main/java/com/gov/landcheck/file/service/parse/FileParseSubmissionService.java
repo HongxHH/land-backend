@@ -111,15 +111,23 @@ public class FileParseSubmissionService {
                             || ParseJobStateEnum.RUNNING.equals(existingJob.getJobStatus()))) {
                 return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "文件解析任务已在进行中");
             }
-            if (!gridFSUtils.exists(fileRecord.getGridfsId())) {
-                log.debug("GridFS文件不存在，开始清理无效文件记录: fileId={}, gridfsId={}", fileRecordId, fileRecord.getGridfsId());
-                fileService.cleanupFileRecordWhenGridFsMissing(fileRecord);
-                log.debug("无效文件记录清理完成: fileId={}, gridfsId={}", fileRecordId, fileRecord.getGridfsId());
-                return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "该文件已不存在，请重新上传后再试");
+            try {
+                if (!gridFSUtils.exists(fileRecord.getGridfsId())) {
+                    log.debug("GridFS文件不存在，开始清理无效文件记录: fileId={}, gridfsId={}", fileRecordId,
+                            fileRecord.getGridfsId());
+                    fileService.cleanupFileRecordWhenGridFsMissing(fileRecord);
+                    log.debug("无效文件记录清理完成: fileId={}, gridfsId={}", fileRecordId, fileRecord.getGridfsId());
+                    return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE),
+                            "该文件已不存在，请重新上传后再试");
+                }
+            } catch (IllegalStateException e) {
+                log.warn("GridFS 存在性检查失败，跳过清理: fileId={}, gridfsId={}, error={}",
+                        fileRecordId, fileRecord.getGridfsId(), e.getMessage());
+                return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE),
+                        "文件存储暂时不可用，请稍后再试");
             }
 
-            resetBusinessStateBeforeParse(fileRecord);
-
+            // 必须先原子抢占 PENDING，再清理业务数据；否则并发提交时失败者会清掉赢家的户室/回填数据。
             rollbackState = fileRecord.getFileState();
             acquired = false;
             if (fileRecordId != null) {
@@ -137,6 +145,9 @@ public class FileParseSubmissionService {
             if (!acquired) {
                 return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "文件解析任务已在进行中");
             }
+
+            resetBusinessStateBeforeParse(fileRecord);
+
             fileRecord.setFileState(FileStateEnum.PENDING);
             fileRecord.setAutoParseQueuedAt(null);
             fileRecord.setAutoParseSuppressed(false);

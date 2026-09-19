@@ -49,11 +49,50 @@ public class SysUserServiceImpl implements SysUserService {
     @Resource
     private BCryptPasswordEncoder userPasswordEncoder;
 
+    /** 串行化「最后一个启用超管」校验与写库，避免并发降级/禁用后无超管。 */
+    private final Object superAdminMutationLock = new Object();
+
     /**
      * 用户管理写操作：仅超级管理员。
      */
     private static void requireSuperAdminRole() {
         StpUtil.checkRole(UserTypeConstants.SUPER_ADMIN);
+    }
+
+    private static boolean isActive(Integer isActive) {
+        return Integer.valueOf(1).equals(isActive);
+    }
+
+    private static boolean isActiveSuperAdmin(SysUser user) {
+        return user != null
+                && UserTypeConstants.SUPER_ADMIN.equals(user.getUserType())
+                && isActive(user.getIsActive());
+    }
+
+    private long countActiveSuperAdmins() {
+        Query query = new Query(Criteria.where("user_type").is(UserTypeConstants.SUPER_ADMIN)
+                .and("is_active").is(1));
+        return mongoTemplate.count(query, SysUser.class);
+    }
+
+    /**
+     * 若目标是当前启用的超管，且变更后不再是启用超管，且库内启用超管 ≤ 1，则拒绝。
+     *
+     * @param nextUserType 变更后的类型；删除场景传 {@code null}
+     * @param nextIsActive 变更后的启用状态；删除场景传 {@code 0}
+     */
+    private AjaxJson rejectIfRemovingLastActiveSuperAdmin(SysUser target, String nextUserType, Integer nextIsActive) {
+        if (!isActiveSuperAdmin(target)) {
+            return null;
+        }
+        boolean remainsActiveSuperAdmin = UserTypeConstants.SUPER_ADMIN.equals(nextUserType) && isActive(nextIsActive);
+        if (remainsActiveSuperAdmin) {
+            return null;
+        }
+        if (countActiveSuperAdmins() <= 1) {
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "至少保留一个启用的超级管理员账号");
+        }
+        return null;
     }
 
     @Override
@@ -200,23 +239,30 @@ public class SysUserServiceImpl implements SysUserService {
                         "用户类型无效，允许：SUPER_ADMIN、DEVELOPER、USER");
             }
 
-            Optional<SysUser> targetOpt = getUserById(userId);
-            if (targetOpt.isEmpty()) {
-                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
-            }
-            SysUser target = targetOpt.get();
-            String currentType = target.getUserType();
+            synchronized (superAdminMutationLock) {
+                Optional<SysUser> targetOpt = getUserById(userId);
+                if (targetOpt.isEmpty()) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+                }
+                SysUser target = targetOpt.get();
+                String currentType = target.getUserType();
 
-            if (newUserType.equals(currentType)) {
-                return AjaxJson.getSuccess("权限类型未变化");
-            }
+                if (newUserType.equals(currentType)) {
+                    return AjaxJson.getSuccess("权限类型未变化");
+                }
 
-            target.setUserType(newUserType);
-            target.setUpdateTime(LocalDateTime.now());
-            mongoTemplate.save(target);
-            log.warn("[AUDIT] user_type_changed operatorId={} targetId={} targetUsername={} oldType={} newType={}",
-                    StpUtil.getLoginIdDefaultNull(), userId, target.getUsername(), currentType, newUserType);
-            return AjaxJson.getSuccess("权限类型已更新");
+                AjaxJson guard = rejectIfRemovingLastActiveSuperAdmin(target, newUserType, target.getIsActive());
+                if (guard != null) {
+                    return guard;
+                }
+
+                target.setUserType(newUserType);
+                target.setUpdateTime(LocalDateTime.now());
+                mongoTemplate.save(target);
+                log.warn("[AUDIT] user_type_changed operatorId={} targetId={} targetUsername={} oldType={} newType={}",
+                        StpUtil.getLoginIdDefaultNull(), userId, target.getUsername(), currentType, newUserType);
+                return AjaxJson.getSuccess("权限类型已更新");
+            }
         } catch (Exception e) {
             log.error("更新用户类型失败: userId={}, error={}", userId, e.getMessage(), e);
             return AjaxJson.getError("更新用户类型失败");
@@ -254,39 +300,45 @@ public class SysUserServiceImpl implements SysUserService {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
                         "用户类型无效，允许：SUPER_ADMIN、DEVELOPER、USER");
             }
-            // 检查用户是否存在
-            Optional<SysUser> existingUserOpt = getUserById(userId);
-            if (existingUserOpt.isEmpty()) {
-                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
-            }
-
             // 检查用户名是否已被其他用户使用
             if (existsByUsername(userDTO.getUsername(), userId)) {
                 return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户名已存在");
             }
 
-            SysUser existingUser = existingUserOpt.get();
-            existingUser.setUsername(userDTO.getUsername());
+            synchronized (superAdminMutationLock) {
+                Optional<SysUser> existingUserOpt = getUserById(userId);
+                if (existingUserOpt.isEmpty()) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+                }
 
-            // 如果密码不为空，则更新密码
-            if (StringUtils.hasText(userDTO.getPassword())) {
-                existingUser.setPassword(userPasswordEncoder.encode(userDTO.getPassword()));
+                SysUser existingUser = existingUserOpt.get();
+                AjaxJson guard = rejectIfRemovingLastActiveSuperAdmin(
+                        existingUser, userDTO.getUserType(), userDTO.getIsActive());
+                if (guard != null) {
+                    return guard;
+                }
+
+                existingUser.setUsername(userDTO.getUsername());
+
+                // 如果密码不为空，则更新密码
+                if (StringUtils.hasText(userDTO.getPassword())) {
+                    existingUser.setPassword(userPasswordEncoder.encode(userDTO.getPassword()));
+                }
+
+                existingUser.setRealName(userDTO.getRealName());
+                existingUser.setPhone(userDTO.getPhone());
+                existingUser.setEmail(userDTO.getEmail());
+                existingUser.setRoleId(userDTO.getRoleId());
+                existingUser.setDeptId(userDTO.getDeptId());
+                existingUser.setUserType(userDTO.getUserType());
+                existingUser.setIsActive(userDTO.getIsActive());
+                existingUser.setUpdateTime(LocalDateTime.now());
+
+                mongoTemplate.save(existingUser);
+
+                log.info("更新用户信息成功: id={}, username={}", userId, existingUser.getUsername());
+                return AjaxJson.getSuccess("更新用户信息成功");
             }
-
-            existingUser.setRealName(userDTO.getRealName());
-            existingUser.setPhone(userDTO.getPhone());
-            existingUser.setEmail(userDTO.getEmail());
-            existingUser.setRoleId(userDTO.getRoleId());
-            existingUser.setDeptId(userDTO.getDeptId());
-            existingUser.setUserType(userDTO.getUserType());
-            existingUser.setIsActive(userDTO.getIsActive());
-            existingUser.setUpdateTime(LocalDateTime.now());
-
-            // 保存到数据库
-            mongoTemplate.save(existingUser);
-
-            log.info("更新用户信息成功: id={}, username={}", userId, existingUser.getUsername());
-            return AjaxJson.getSuccess("更新用户信息成功");
 
         } catch (Exception e) {
             log.error("更新用户信息失败: id={}, error={}", userId, e.getMessage(), e);
@@ -298,21 +350,27 @@ public class SysUserServiceImpl implements SysUserService {
     public AjaxJson deleteUser(Long userId) {
         requireSuperAdminRole();
         try {
-            // 检查用户是否存在
-            Optional<SysUser> userOpt = getUserById(userId);
-            if (userOpt.isEmpty()) {
-                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+            synchronized (superAdminMutationLock) {
+                Optional<SysUser> userOpt = getUserById(userId);
+                if (userOpt.isEmpty()) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+                }
+                SysUser target = userOpt.get();
+                String targetUsername = target.getUsername();
+
+                AjaxJson guard = rejectIfRemovingLastActiveSuperAdmin(target, null, 0);
+                if (guard != null) {
+                    return guard;
+                }
+
+                Query query = new Query(Criteria.where("id").is(userId));
+                mongoTemplate.remove(query, SysUser.class);
+
+                log.warn("[AUDIT] user_deleted operatorId={} targetId={} targetUsername={}",
+                        StpUtil.getLoginIdDefaultNull(), userId, targetUsername);
+                log.info("删除用户成功: id={}", userId);
+                return AjaxJson.getSuccess("删除用户成功");
             }
-            String targetUsername = userOpt.get().getUsername();
-
-            // 删除用户
-            Query query = new Query(Criteria.where("id").is(userId));
-            mongoTemplate.remove(query, SysUser.class);
-
-            log.warn("[AUDIT] user_deleted operatorId={} targetId={} targetUsername={}",
-                    StpUtil.getLoginIdDefaultNull(), userId, targetUsername);
-            log.info("删除用户成功: id={}", userId);
-            return AjaxJson.getSuccess("删除用户成功");
 
         } catch (Exception e) {
             log.error("删除用户失败: id={}, error={}", userId, e.getMessage(), e);
@@ -391,23 +449,28 @@ public class SysUserServiceImpl implements SysUserService {
     public AjaxJson toggleUserStatus(Long userId, Integer isActive) {
         requireSuperAdminRole();
         try {
-            // 检查用户是否存在
-            Optional<SysUser> userOpt = getUserById(userId);
-            if (userOpt.isEmpty()) {
-                return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+            synchronized (superAdminMutationLock) {
+                Optional<SysUser> userOpt = getUserById(userId);
+                if (userOpt.isEmpty()) {
+                    return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "用户不存在");
+                }
+                SysUser target = userOpt.get();
+                AjaxJson guard = rejectIfRemovingLastActiveSuperAdmin(target, target.getUserType(), isActive);
+                if (guard != null) {
+                    return guard;
+                }
+
+                Query query = new Query(Criteria.where("id").is(userId));
+                Update update = new Update()
+                        .set("is_active", isActive)
+                        .set("update_time", LocalDateTime.now());
+
+                mongoTemplate.updateFirst(query, update, SysUser.class);
+
+                String statusText = isActive == 1 ? "启用" : "禁用";
+                log.info("{}用户成功: id={}", statusText, userId);
+                return AjaxJson.getSuccess(statusText + "用户成功");
             }
-
-            // 更新状态
-            Query query = new Query(Criteria.where("id").is(userId));
-            Update update = new Update()
-                    .set("is_active", isActive)
-                    .set("update_time", LocalDateTime.now());
-
-            mongoTemplate.updateFirst(query, update, SysUser.class);
-
-            String statusText = isActive == 1 ? "启用" : "禁用";
-            log.info("{}用户成功: id={}", statusText, userId);
-            return AjaxJson.getSuccess(statusText + "用户成功");
 
         } catch (Exception e) {
             log.error("切换用户状态失败: id={}, error={}", userId, e.getMessage(), e);

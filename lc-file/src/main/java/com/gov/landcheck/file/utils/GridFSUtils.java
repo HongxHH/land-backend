@@ -30,18 +30,26 @@ public class GridFSUtils {
     private GridFSBucket gridFsBucket;
 
     /**
-     * 检查 GridFS 文件是否存在
+     * 检查 GridFS 文件是否存在。
+     * <p>
+     * ID 格式非法或文件不存在时返回 {@code false}；查询过程中的基础设施异常会向上抛出，
+     * 避免调用方把瞬时故障误判为「文件缺失」并级联删除业务记录。
      *
      * @param gridfsId 文件ID
-     * @return true 如果文件存在，false 如果不存在
+     * @return true 如果文件存在，false 如果不存在或 ID 无效
+     * @throws IllegalStateException 当 GridFS 查询因基础设施故障失败时
      */
     public boolean exists(String gridfsId) {
+        if (gridfsId == null || gridfsId.isBlank() || !ObjectId.isValid(gridfsId)) {
+            log.warn("GridFS 文件ID格式无效: gridfsId={}", gridfsId);
+            return false;
+        }
         try {
             GridFSFile fsFile = gridFsBucket.find(new Document("_id", new ObjectId(gridfsId))).first();
             return fsFile != null;
         } catch (Exception e) {
-            log.warn("检查 GridFS 文件存在性失败: gridfsId={}, error={}", gridfsId, e.getMessage());
-            return false;
+            log.warn("检查 GridFS 文件存在性失败: gridfsId={}, error={}", gridfsId, e.getMessage(), e);
+            throw new IllegalStateException("GridFS 文件存在性检查失败，请稍后再试", e);
         }
     }
 
@@ -59,7 +67,7 @@ public class GridFSUtils {
         }
 
         try (GridFSDownloadStream downloadStream = gridFsBucket.openDownloadStream(fsFile.getObjectId());
-             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
 
             byte[] buffer = new byte[8192];
             int bytesRead;
@@ -74,7 +82,7 @@ public class GridFSUtils {
     /**
      * 从 GridFS 下载文件到指定路径
      *
-     * @param gridfsId 文件ID
+     * @param gridfsId   文件ID
      * @param targetPath 目标文件路径
      * @throws Exception 如果文件不存在或下载失败
      */
@@ -85,7 +93,7 @@ public class GridFSUtils {
         }
 
         try (GridFSDownloadStream downloadStream = gridFsBucket.openDownloadStream(fsFile.getObjectId());
-             FileOutputStream outputStream = new FileOutputStream(targetPath.toFile())) {
+                FileOutputStream outputStream = new FileOutputStream(targetPath.toFile())) {
 
             byte[] buffer = new byte[8192];
             int bytesRead;
@@ -117,8 +125,8 @@ public class GridFSUtils {
     /**
      * 上传字符串内容到 GridFS
      *
-     * @param content 字符串内容
-     * @param filename 文件名
+     * @param content     字符串内容
+     * @param filename    文件名
      * @param contentType 内容类型（可选）
      * @return GridFS 文件ID
      * @throws Exception 如果上传失败
@@ -131,8 +139,8 @@ public class GridFSUtils {
     /**
      * 上传字节数组到 GridFS
      *
-     * @param bytes 字节数组
-     * @param filename 文件名
+     * @param bytes       字节数组
+     * @param filename    文件名
      * @param contentType 内容类型（可选）
      * @return GridFS 文件ID
      * @throws Exception 如果上传失败

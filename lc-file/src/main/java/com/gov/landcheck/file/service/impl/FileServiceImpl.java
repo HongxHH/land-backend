@@ -18,25 +18,24 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.BeanUtils;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.gridfs.GridFsTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.mongodb.client.result.UpdateResult;
 import com.gov.landcheck.core.audit.AuditDiffHelper;
 import com.gov.landcheck.core.audit.AuditFileRecorder;
 import com.gov.landcheck.core.audit.AuditOperation;
+import com.gov.landcheck.core.audit.FileOperationAuthorization;
 import com.gov.landcheck.core.audit.OperationAuditService;
 import com.gov.landcheck.core.audit.OperationType;
 import com.gov.landcheck.core.audit.OperatorContext;
@@ -62,24 +61,23 @@ import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.config.query.MongoQueryBuilder;
 import com.gov.landcheck.core.config.query.MongoSortFields;
 import com.gov.landcheck.core.config.query.SafePageSort;
-import com.gov.landcheck.core.audit.FileOperationAuthorization;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.FileType;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.core.service.IFileArchiveService;
 import com.gov.landcheck.core.service.SurveyReportContractApprovalSyncService;
-import com.gov.landcheck.file.dto.FileUploadDTO;
+import com.gov.landcheck.core.utils.UploadFileNameSanitizer;
 import com.gov.landcheck.file.dto.FileQueryDTO;
 import com.gov.landcheck.file.dto.FileQueryResultDTO;
+import com.gov.landcheck.file.dto.FileUploadDTO;
 import com.gov.landcheck.file.dto.SubmitParseResult;
 import com.gov.landcheck.file.service.FileService;
-import com.gov.landcheck.core.utils.UploadFileNameSanitizer;
-import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
-import com.gov.landcheck.file.service.parse.ParseCancelSupport;
-import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.UploadRecordService;
+import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
+import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
+import com.gov.landcheck.file.service.parse.ParseCancelSupport;
 import com.gov.landcheck.file.utils.GridFSUtils;
 import com.gov.landcheck.file.vo.FileRecordVO;
 
@@ -199,6 +197,10 @@ public class FileServiceImpl implements FileService {
         FileRecord fileRecord = mongoTemplate.findById(fileId, FileRecord.class);
         if (fileRecord == null) {
             return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE, "文件不存在");
+        }
+        if (!FileOperationAuthorization.canMutateFile(fileRecord)) {
+            return AjaxJson.get(MessageConstant.PARAMS_ERROR_CODE,
+                    FileOperationAuthorization.denyReasonForFileMutate());
         }
         SubmitParseResult result = submitParseIfEligible(fileRecord);
         if (result.isSubmitted()) {
@@ -350,14 +352,17 @@ public class FileServiceImpl implements FileService {
         parseJob.requestCancel(reason);
         mongoTemplate.save(parseJob);
 
-        // 5. 任务在线程池中运行时强制取消；否则回滚中间产物
+        // 5. 任务在线程池中运行时强制取消；当前任务且未在池中则回滚中间产物
         boolean wasRunningInPool = taskExecuteService.isTaskRunning(parseJob.getTaskId());
         boolean poolCancelled = false;
         if (wasRunningInPool) {
             poolCancelled = taskExecuteService.cancelParseTask(parseJob.getTaskId(), reason);
-        } else {
+        } else if (targetsCurrentJob) {
             taskExecuteService.rollbackParseJob(parseJob, fileRecord);
             log.info("任务未在线程池运行，已回滚中间数据: taskId={}, fileId={}", parseJob.getTaskId(), fileId);
+        } else {
+            log.info("历史解析任务未在线程池运行，仅标记取消，跳过文件级业务数据回滚: taskId={}, fileId={}, latestParseJobId={}",
+                    parseJob.getTaskId(), fileId, latestJob != null ? latestJob.getId() : null);
         }
 
         // 6. 更新文件状态（仅当取消的是当前最新任务时）
