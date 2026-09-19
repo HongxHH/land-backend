@@ -22,6 +22,7 @@ import com.gov.landcheck.core.bo.entity.ParsedDataHeader;
 import com.gov.landcheck.core.bo.entity.ParsedDataItem;
 import com.gov.landcheck.core.bo.entity.PlanningReviewForm;
 import com.gov.landcheck.core.bo.entity.PlanningReviewRow;
+import com.gov.landcheck.core.bo.entity.ProjectPartyDeclaredTotals;
 import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
@@ -57,6 +58,9 @@ public class ParseArtifactCleanupService {
 
     @Autowired(required = false)
     private ApplicationEventPublisher applicationEventPublisher;
+
+    @Resource
+    private ParseFillSnapshotService parseFillSnapshotService;
 
     public void cleanupBeforeMarkFailed(List<ParseJob> hangingJobs) {
         if (hangingJobs == null || hangingJobs.isEmpty()) {
@@ -217,6 +221,11 @@ public class ParseArtifactCleanupService {
             return summary;
         }
         try {
+            if (parseFillSnapshotService.restoreIfPresent(taskData)) {
+                publishFillRestoredEvents(taskData.getFileRecord(), taskData);
+                summary.recordSuccess("FILL: 已从落盘快照恢复业务数据");
+                return summary;
+            }
             revertFillBusinessState(taskData.getFileRecord(), taskData);
             summary.recordSuccess("FILL: 已恢复业务回填状态");
         } catch (Exception ex) {
@@ -247,28 +256,8 @@ public class ParseArtifactCleanupService {
         return summary;
     }
 
-    public void resetBusinessStateBeforeParse(FileRecord fileRecord) {
-        if (fileRecord == null || fileRecord.getId() == null || fileRecord.getFileContextType() == null) {
-            return;
-        }
-        revertFillBusinessStateForContext(fileRecord, null);
-        publishReparseResetEvents(fileRecord);
-        if (fileRecord.getFileContextType() == FileContextType.SURVEY_REPORT) {
-            Query deleteQuery = new Query(Criteria.where("file_record_id").is(fileRecord.getId()));
-            long roomsDeleted = mongoTemplate.remove(deleteQuery, RoomInfo.class).getDeletedCount();
-            if (roomsDeleted > 0) {
-                log.info("重新解析前已清理房间数据: fileRecordId={}, deleted={}", fileRecord.getId(), roomsDeleted);
-            }
-        }
-    }
-
     public void revertFillBusinessState(FileRecord fileRecord, TaskData taskData) {
         revertFillBusinessStateForContext(fileRecord, taskData);
-        Long fileRecordId = fileRecord.getId();
-        Query deleteQuery = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        mongoTemplate.remove(deleteQuery, RoomInfo.class);
-        mongoTemplate.remove(deleteQuery, PlanningReviewRow.class);
-        mongoTemplate.remove(deleteQuery, ProjectPartySurveySummaryForm.LEGACY_ROW_COLLECTION);
     }
 
     private void revertFillBusinessStateForContext(FileRecord fileRecord, TaskData taskData) {
@@ -279,7 +268,7 @@ public class ParseArtifactCleanupService {
         Long fileRecordId = fileRecord.getId();
         switch (contextType) {
             case CONTRACT -> revertContractFill(fileRecordId, taskData);
-            case SURVEY_REPORT -> revertSurveyReportFill(fileRecordId);
+            case SURVEY_REPORT -> revertSurveyReportFill(fileRecordId, taskData);
             case PLANNING_REVIEW -> revertPlanningReviewFill(fileRecordId, fileRecord.getProjectId(), taskData);
             case CAPACITY_INDICATOR -> revertCapacityIndicatorFill(fileRecordId, fileRecord.getProjectId(), taskData);
             case PROJECT_PARTY_SURVEY_SUMMARY -> revertProjectPartySummaryFill(fileRecordId, fileRecord.getProjectId(),
@@ -315,18 +304,41 @@ public class ParseArtifactCleanupService {
         log.warn("合同回填回滚跳过（无快照且非本次新建，避免离线误删）: fileRecordId={}", fileRecordId);
     }
 
-    private void revertSurveyReportFill(Long fileRecordId) {
-        long unknownDeleted = unknownUsageRecordService.deleteByFileRecordId(fileRecordId);
-        if (unknownDeleted > 0) {
-            log.debug("回填回滚：已清理未知用途, fileRecordId={}, deleted={}", fileRecordId, unknownDeleted);
-        }
+    private void revertSurveyReportFill(Long fileRecordId, TaskData taskData) {
         Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        Update update = SurveyReportFieldUpdates.reparseReset();
-        mongoTemplate.updateFirst(query, update, SurveyReportInfo.class);
-        SurveyReportInfo sr = mongoTemplate.findOne(query, SurveyReportInfo.class);
-        if (sr != null && sr.getProjectId() != null && sr.getId() != null) {
-            publish(ProjectDataChangedEvent.surveyReportChanged(sr.getProjectId(), sr.getId(), false));
+        if (taskData != null && taskData.getPreFillSurveySnapshot() != null) {
+            SurveyReportInfo snapshot = taskData.getPreFillSurveySnapshot();
+            snapshot.setUpdateTime(LocalDateTime.now());
+            mongoTemplate.save(snapshot);
+            if (taskData.getPreFillRoomsSnapshot() != null) {
+                mongoTemplate.remove(query, RoomInfo.class);
+                List<RoomInfo> roomSnapshots = taskData.getPreFillRoomsSnapshot();
+                if (!roomSnapshots.isEmpty()) {
+                    List<RoomInfo> copies = copyRoomSnapshots(roomSnapshots);
+                    LocalDateTime now = LocalDateTime.now();
+                    for (RoomInfo room : copies) {
+                        room.setUpdateTime(now);
+                    }
+                    mongoTemplate.insertAll(copies);
+                }
+            }
+            if (snapshot.getProjectId() != null && snapshot.getId() != null) {
+                publish(ProjectDataChangedEvent.surveyReportChanged(snapshot.getProjectId(), snapshot.getId(), true));
+            }
+            return;
         }
+        if (taskData != null && taskData.isFillCreatedNewSurvey()) {
+            List<SurveyReportInfo> removed = mongoTemplate.find(query, SurveyReportInfo.class);
+            mongoTemplate.remove(query, RoomInfo.class);
+            mongoTemplate.remove(query, SurveyReportInfo.class);
+            for (SurveyReportInfo sr : removed) {
+                if (sr.getProjectId() != null && sr.getId() != null) {
+                    publish(ProjectDataChangedEvent.surveyReportChanged(sr.getProjectId(), sr.getId(), true));
+                }
+            }
+            return;
+        }
+        log.warn("实测回填回滚跳过（无快照且非本次新建，避免离线误删户室）: fileRecordId={}", fileRecordId);
     }
 
     private void revertPlanningReviewFill(Long fileRecordId, Long projectId, TaskData taskData) {
@@ -340,10 +352,12 @@ public class ParseArtifactCleanupService {
             mongoTemplate.remove(rowQuery, PlanningReviewRow.class);
             List<PlanningReviewRow> rowSnapshots = taskData.getPreFillPlanningRowsSnapshot();
             if (rowSnapshots != null && !rowSnapshots.isEmpty()) {
-                for (PlanningReviewRow row : rowSnapshots) {
-                    row.setUpdateTime(LocalDateTime.now());
+                List<PlanningReviewRow> copies = copyPlanningRowSnapshots(rowSnapshots);
+                LocalDateTime now = LocalDateTime.now();
+                for (PlanningReviewRow row : copies) {
+                    row.setUpdateTime(now);
                 }
-                mongoTemplate.insertAll(rowSnapshots);
+                mongoTemplate.insertAll(copies);
             }
             if (projectId != null) {
                 publish(ProjectDataChangedEvent.planningReviewChanged(projectId));
@@ -358,14 +372,7 @@ public class ParseArtifactCleanupService {
             }
             return;
         }
-        Update update = new Update()
-                .set("is_parsed", 0)
-                .set("update_time", LocalDateTime.now());
-        mongoTemplate.updateFirst(query, update, PlanningReviewForm.class);
-        if (projectId != null) {
-            publish(ProjectDataChangedEvent.planningReviewChanged(projectId));
-        }
-        log.warn("规划复核回填回滚无法恢复字段快照，已重置 is_parsed: fileRecordId={}", fileRecordId);
+        log.warn("规划复核回填回滚跳过（无快照且非本次新建）: fileRecordId={}", fileRecordId);
     }
 
     private void revertCapacityIndicatorFill(Long fileRecordId, Long projectId, TaskData taskData) {
@@ -387,14 +394,7 @@ public class ParseArtifactCleanupService {
             }
             return;
         }
-        Update update = new Update()
-                .set("is_parsed", 0)
-                .set("update_time", LocalDateTime.now());
-        mongoTemplate.updateFirst(query, update, CapacityIndicatorInfo.class);
-        if (projectId != null) {
-            publish(ProjectDataChangedEvent.capacityIndicatorChanged(projectId));
-        }
-        log.warn("容量指标回填回滚无法恢复字段快照，已重置 is_parsed: fileRecordId={}", fileRecordId);
+        log.warn("容量指标回填回滚跳过（无快照且非本次新建）: fileRecordId={}", fileRecordId);
     }
 
     private void revertProjectPartySummaryFill(Long fileRecordId, Long projectId, TaskData taskData) {
@@ -418,19 +418,7 @@ public class ParseArtifactCleanupService {
             }
             return;
         }
-        Update update = new Update()
-                .set("is_parsed", 0)
-                .set("parse_status", "PENDING")
-                .set("remark", null)
-                .set("update_time", LocalDateTime.now());
-        mongoTemplate.updateFirst(query, update, ProjectPartySurveySummaryForm.class);
-        ProjectPartySurveySummaryForm form = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
-        if (form != null && form.getProjectId() != null && form.getId() != null) {
-            publish(ProjectDataChangedEvent.projectPartySummaryChanged(form.getProjectId(), form.getId()));
-        } else if (projectId != null) {
-            publish(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, null));
-        }
-        log.warn("项目方汇总回填回滚无法恢复字段快照，已重置 parse 状态: fileRecordId={}", fileRecordId);
+        log.warn("项目方汇总回填回滚跳过（无快照且非本次新建）: fileRecordId={}", fileRecordId);
     }
 
     public void revertValidateBusinessState(FileRecord fileRecord) {
@@ -555,6 +543,85 @@ public class ParseArtifactCleanupService {
         return copy;
     }
 
+    public static SurveyReportInfo copySurveyReportSnapshot(SurveyReportInfo source) {
+        if (source == null) {
+            return null;
+        }
+        SurveyReportInfo copy = new SurveyReportInfo();
+        copy.setId(source.getId());
+        copy.setProjectId(source.getProjectId());
+        copy.setFileRecordId(source.getFileRecordId());
+        copy.setBuildingName(source.getBuildingName());
+        copy.setPhase(source.getPhase());
+        copy.setPropertyCertificateNumber(source.getPropertyCertificateNumber());
+        copy.setRealEstateSurveyReportNumber(source.getRealEstateSurveyReportNumber());
+        copy.setPropertyAreaConfirmationNoticeNumber(source.getPropertyAreaConfirmationNoticeNumber());
+        copy.setContractApprovalNumber(source.getContractApprovalNumber());
+        copy.setActualTotalBuildingArea(source.getActualTotalBuildingArea());
+        copy.setActualResidentialArea(source.getActualResidentialArea());
+        copy.setActualCommercialArea(source.getActualCommercialArea());
+        copy.setActualManagementRoomArea(source.getActualManagementRoomArea());
+        copy.setActualOtherBuildableArea(source.getActualOtherBuildableArea());
+        copy.setActualCommunityArea(source.getActualCommunityArea());
+        copy.setActualOtherPublicArea(source.getActualOtherPublicArea());
+        copy.setTotalBuildableArea(source.getTotalBuildableArea());
+        copy.setTotalNonBuildableArea(source.getTotalNonBuildableArea());
+        copy.setPendingConfirmArea(source.getPendingConfirmArea());
+        copy.setHasUnknownUsage(source.getHasUnknownUsage());
+        copy.setUnknownUsages(source.getUnknownUsages());
+        copy.setUnknownUsageCount(source.getUnknownUsageCount());
+        copy.setRoomInfoBuildingAreaSum(source.getRoomInfoBuildingAreaSum());
+        copy.setRoomInfoInnerAreaSum(source.getRoomInfoInnerAreaSum());
+        copy.setRoomInfoBalconyAreaSum(source.getRoomInfoBalconyAreaSum());
+        copy.setRoomInfoSharedAreaSum(source.getRoomInfoSharedAreaSum());
+        copy.setRoomInfoBuildingAreaSumFromOcr(source.getRoomInfoBuildingAreaSumFromOcr());
+        copy.setRoomInfoInnerAreaSumFromOcr(source.getRoomInfoInnerAreaSumFromOcr());
+        copy.setRoomInfoBalconyAreaSumFromOcr(source.getRoomInfoBalconyAreaSumFromOcr());
+        copy.setRoomInfoSharedAreaSumFromOcr(source.getRoomInfoSharedAreaSumFromOcr());
+        copy.setIsVerified(source.getIsVerified());
+        copy.setVerificationErrorReason(source.getVerificationErrorReason());
+        copy.setIsParsed(source.getIsParsed());
+        copy.setRemark(source.getRemark());
+        copy.setCreateTime(source.getCreateTime());
+        copy.setUpdateTime(source.getUpdateTime());
+        copy.setIsDeleted(source.getIsDeleted());
+        return copy;
+    }
+
+    public static List<RoomInfo> copyRoomSnapshots(List<RoomInfo> source) {
+        if (source == null || source.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<RoomInfo> copies = new ArrayList<>(source.size());
+        for (RoomInfo room : source) {
+            if (room == null) {
+                continue;
+            }
+            RoomInfo copy = new RoomInfo();
+            copy.setId(room.getId());
+            copy.setProjectId(room.getProjectId());
+            copy.setFileRecordId(room.getFileRecordId());
+            copy.setSurveyReportInfoId(room.getSurveyReportInfoId());
+            copy.setRoomLevel(room.getRoomLevel());
+            copy.setRoomNumber(room.getRoomNumber());
+            copy.setBuildingArea(room.getBuildingArea());
+            copy.setInnerArea(room.getInnerArea());
+            copy.setBalconyArea(room.getBalconyArea());
+            copy.setSharedArea(room.getSharedArea());
+            copy.setRoomStructure(room.getRoomStructure());
+            copy.setRoomUsage(room.getRoomUsage());
+            copy.setRemark(room.getRemark());
+            copy.setIsCalculate(room.getIsCalculate());
+            copy.setUsageCategory(room.getUsageCategory());
+            copy.setFloorAreaType(room.getFloorAreaType());
+            copy.setCreateTime(room.getCreateTime());
+            copy.setUpdateTime(room.getUpdateTime());
+            copy.setIsDeleted(room.getIsDeleted());
+            copies.add(copy);
+        }
+        return copies;
+    }
+
     public static PlanningReviewForm copyPlanningFormSnapshot(PlanningReviewForm source) {
         if (source == null) {
             return null;
@@ -648,7 +715,7 @@ public class ParseArtifactCleanupService {
         copy.setProjectId(source.getProjectId());
         copy.setFileRecordId(source.getFileRecordId());
         copy.setIsParsed(source.getIsParsed());
-        copy.setDeclaredTotals(source.getDeclaredTotals());
+        copy.setDeclaredTotals(copyDeclaredTotals(source.getDeclaredTotals()));
         copy.setParseStatus(source.getParseStatus());
         copy.setRemark(source.getRemark());
         copy.setCreateTime(source.getCreateTime());
@@ -656,25 +723,44 @@ public class ParseArtifactCleanupService {
         return copy;
     }
 
-    private void publishReparseResetEvents(FileRecord fileRecord) {
-        if (fileRecord == null || fileRecord.getId() == null || fileRecord.getFileContextType() == null) {
+    private static ProjectPartyDeclaredTotals copyDeclaredTotals(ProjectPartyDeclaredTotals source) {
+        if (source == null) {
+            return null;
+        }
+        ProjectPartyDeclaredTotals copy = new ProjectPartyDeclaredTotals();
+        copy.setContractAgreedTotalBuildingArea(source.getContractAgreedTotalBuildingArea());
+        copy.setBuildableTotalBuildingArea(source.getBuildableTotalBuildingArea());
+        copy.setDifferenceTotalBuildingArea(source.getDifferenceTotalBuildingArea());
+        copy.setContractAgreedCommercialArea(source.getContractAgreedCommercialArea());
+        copy.setBuildableCommercialArea(source.getBuildableCommercialArea());
+        copy.setDifferenceCommercialArea(source.getDifferenceCommercialArea());
+        copy.setContractAgreedResidentialArea(source.getContractAgreedResidentialArea());
+        copy.setBuildableResidentialArea(source.getBuildableResidentialArea());
+        copy.setDifferenceResidentialArea(source.getDifferenceResidentialArea());
+        return copy;
+    }
+
+    private void publishFillRestoredEvents(FileRecord fileRecord, TaskData taskData) {
+        if (fileRecord == null || fileRecord.getFileContextType() == null) {
             return;
         }
-        Long fileRecordId = fileRecord.getId();
         Long projectId = fileRecord.getProjectId();
         switch (fileRecord.getFileContextType()) {
             case CONTRACT -> {
-                ContractInfo contract = mongoTemplate.findOne(
-                        new Query(Criteria.where("file_record_id").is(fileRecordId)), ContractInfo.class);
-                if (contract != null && contract.getProjectId() != null && contract.getId() != null) {
-                    publish(ProjectDataChangedEvent.contractChanged(contract.getProjectId(), contract.getId()));
+                ContractInfo snapshot = taskData != null ? taskData.getPreFillContractSnapshot() : null;
+                if (snapshot != null && snapshot.getProjectId() != null && snapshot.getId() != null) {
+                    publish(ProjectDataChangedEvent.contractChanged(snapshot.getProjectId(), snapshot.getId()));
+                } else if (projectId != null) {
+                    publish(ProjectDataChangedEvent.contractChanged(projectId, null));
                 }
             }
             case SURVEY_REPORT -> {
-                SurveyReportInfo sr = mongoTemplate.findOne(
-                        new Query(Criteria.where("file_record_id").is(fileRecordId)), SurveyReportInfo.class);
-                if (sr != null && sr.getProjectId() != null && sr.getId() != null) {
-                    publish(ProjectDataChangedEvent.surveyReportChanged(sr.getProjectId(), sr.getId(), true));
+                SurveyReportInfo snapshot = taskData != null ? taskData.getPreFillSurveySnapshot() : null;
+                if (snapshot != null && snapshot.getProjectId() != null && snapshot.getId() != null) {
+                    publish(ProjectDataChangedEvent.surveyReportChanged(snapshot.getProjectId(), snapshot.getId(),
+                            true));
+                } else if (projectId != null) {
+                    publish(ProjectDataChangedEvent.surveyReportChanged(projectId, null, true));
                 }
             }
             case PLANNING_REVIEW -> {
@@ -688,11 +774,10 @@ public class ParseArtifactCleanupService {
                 }
             }
             case PROJECT_PARTY_SURVEY_SUMMARY -> {
-                ProjectPartySurveySummaryForm form = mongoTemplate.findOne(
-                        new Query(Criteria.where("file_record_id").is(fileRecordId)),
-                        ProjectPartySurveySummaryForm.class);
-                if (form != null && form.getProjectId() != null && form.getId() != null) {
-                    publish(ProjectDataChangedEvent.projectPartySummaryChanged(form.getProjectId(), form.getId()));
+                ProjectPartySurveySummaryForm snapshot = taskData != null ? taskData.getPreFillPartySummarySnapshot()
+                        : null;
+                if (snapshot != null && snapshot.getProjectId() != null && snapshot.getId() != null) {
+                    publish(ProjectDataChangedEvent.projectPartySummaryChanged(snapshot.getProjectId(), snapshot.getId()));
                 } else if (projectId != null) {
                     publish(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, null));
                 }

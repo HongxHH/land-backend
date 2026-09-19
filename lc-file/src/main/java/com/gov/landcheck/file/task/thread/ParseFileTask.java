@@ -30,6 +30,7 @@ import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
 import com.gov.landcheck.file.service.RetryDecisionService;
+import com.gov.landcheck.file.service.parse.ParseFillSnapshotService;
 import com.gov.landcheck.file.task.base.Task;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
@@ -335,6 +336,7 @@ public class ParseFileTask implements Task {
                             ex.getMessage());
                     persistParseSuccessState(mongoTemplate, parseJobUpdateService);
                 }
+                deleteFillSnapshotQuietly();
             }
 
             case FAILED -> {
@@ -384,6 +386,22 @@ public class ParseFileTask implements Task {
                 payload,
                 // 解析结果是前端状态同步关键链路，不能因全局限流被丢弃
                 null);
+    }
+
+    private void deleteFillSnapshotQuietly() {
+        try {
+            ParseJob parseJob = taskData.getParseJob();
+            if (parseJob == null || parseJob.getId() == null) {
+                return;
+            }
+            ParseFillSnapshotService snapshotService = ApplicationContextProvider
+                    .getBean(ParseFillSnapshotService.class);
+            snapshotService.deleteByParseJobId(parseJob.getId());
+        } catch (Exception ex) {
+            log.warn("删除回填快照失败: fileId={}, taskId={}, error={}",
+                    taskData.getFileRecord() != null ? taskData.getFileRecord().getId() : null,
+                    getTaskId(), ex.getMessage(), ex);
+        }
     }
 
     /**

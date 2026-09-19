@@ -1,12 +1,16 @@
 package com.gov.landcheck.file.task.processor.command;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.gov.landcheck.core.bo.entity.ProjectPartyDeclaredTotals;
 import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
 import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.ParseFillSnapshotService;
 import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
@@ -24,6 +28,9 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class FillCommand extends AbstractCommand {
 
+    /** 只罩写库，不罩 OCR；副本集事务必须启用，失败不得降级为无事务替换。 */
+    private static final int FILL_TX_TIMEOUT_SECONDS = 30;
+
     @Resource
     private DataFillReceiver dataFillReceiver;
 
@@ -32,6 +39,12 @@ public class FillCommand extends AbstractCommand {
 
     @Resource
     private ParseArtifactCleanupService parseArtifactCleanupService;
+
+    @Resource
+    private ParseFillSnapshotService parseFillSnapshotService;
+
+    @Resource
+    private PlatformTransactionManager transactionManager;
 
     public FillCommand() {
         super("数据回填", "FILL");
@@ -55,23 +68,36 @@ public class FillCommand extends AbstractCommand {
         taskData.setFillCommandEntered(true);
 
         parseJobUpdateService.updateFillStarted(taskData.getParseJob());
+        parseFillSnapshotService.captureIfAbsent(taskData);
 
         try {
-            dataFillReceiver.fillData(taskData);
+            TransactionTemplate tpl = new TransactionTemplate(transactionManager);
+            tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+            tpl.setTimeout(FILL_TX_TIMEOUT_SECONDS);
+            tpl.executeWithoutResult(status -> {
+                try {
+                    dataFillReceiver.fillData(taskData);
+                } catch (RuntimeException ex) {
+                    throw ex;
+                } catch (Exception ex) {
+                    throw new IllegalStateException(ex);
+                }
+            });
             parseJobUpdateService.updateFillCompleted(taskData.getParseJob(), null);
             log.debug("数据回填完成: fileId={}", taskData.getFileRecord().getId());
 
         } catch (Exception e) {
-            TaskException.ErrorCode errorCode = TaskFailureClassifier.classifyFillFailure(e);
-            parseJobUpdateService.updateFillFailed(taskData.getParseJob(), e.getMessage());
+            Exception classified = unwrapFillException(e);
+            TaskException.ErrorCode errorCode = TaskFailureClassifier.classifyFillFailure(classified);
+            parseJobUpdateService.updateFillFailed(taskData.getParseJob(), classified.getMessage());
 
             throw new TaskException(
                     errorCode,
                     getStage(),
                     taskData.getFileRecord().getId(),
                     taskData.getParseJob() != null ? taskData.getParseJob().getId() : null,
-                    "数据回填失败: " + e.getMessage(),
-                    e);
+                    "数据回填失败: " + classified.getMessage(),
+                    classified);
         }
     }
 
@@ -102,5 +128,16 @@ public class FillCommand extends AbstractCommand {
         }
         ProjectPartyDeclaredTotals totals = form.getDeclaredTotals();
         return totals == null || !totals.hasAnyDeclaredField();
+    }
+
+    private static Exception unwrapFillException(Exception e) {
+        Throwable current = e;
+        if (current instanceof IllegalStateException && current.getCause() instanceof Exception cause) {
+            current = cause;
+        }
+        if (current instanceof Exception ex) {
+            return ex;
+        }
+        return e;
     }
 }

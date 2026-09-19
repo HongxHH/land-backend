@@ -119,6 +119,21 @@ public class TaskData {
     private boolean fillCreatedNewContract;
 
     /**
+     * 回填前的实测报告主表快照
+     */
+    private SurveyReportInfo preFillSurveySnapshot;
+
+    /**
+     * 回填前的户室快照
+     */
+    private List<RoomInfo> preFillRoomsSnapshot;
+
+    /**
+     * 本次 Fill 是否新建了实测报告主表
+     */
+    private boolean fillCreatedNewSurvey;
+
+    /**
      * 回填前是否已存在规划复核主表
      */
     private boolean preFillPlanningFormExisted;

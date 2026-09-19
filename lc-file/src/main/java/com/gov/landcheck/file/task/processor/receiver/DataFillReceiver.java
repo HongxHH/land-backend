@@ -11,10 +11,12 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
-import com.gov.landcheck.core.bo.entity.ContractInfo;
 import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
+import com.gov.landcheck.core.bo.entity.ContractInfo;
 import com.gov.landcheck.core.bo.entity.ParsedDataItem;
 import com.gov.landcheck.core.bo.entity.PlanningReviewForm;
 import com.gov.landcheck.core.bo.entity.PlanningReviewRow;
@@ -62,7 +64,7 @@ public class DataFillReceiver {
         fillHandlers.put(FileContextType.PROJECT_PARTY_SURVEY_SUMMARY, this::fillProjectPartySummaryData);
     }
 
-    // @Transactional(rollbackFor = Exception.class, timeout = 300)
+    // 回填写库由 FillCommand 用短事务包住；本方法只做替换，不再单独开事务。
     public void fillData(TaskData taskData) throws Exception {
         if (taskData.getFileRecord().getFileContextType() != null) {
             FillHandler handler = fillHandlers.get(taskData.getFileRecord().getFileContextType());
@@ -84,7 +86,7 @@ public class DataFillReceiver {
         ContractInfo existingContractInfo = mongoTemplate.findOne(query, ContractInfo.class);
 
         taskData.setPreFillContractExisted(existingContractInfo != null);
-        if (existingContractInfo != null) {
+        if (existingContractInfo != null && taskData.getPreFillContractSnapshot() == null) {
             taskData.setPreFillContractSnapshot(ParseArtifactCleanupService.copyContractSnapshot(existingContractInfo));
         }
 
@@ -147,6 +149,18 @@ public class DataFillReceiver {
         Query query = new Query(Criteria.where("file_record_id").is(taskData.getFileRecord().getId()));
         SurveyReportInfo existingInfo = mongoTemplate.findOne(query, SurveyReportInfo.class);
         SurveyReportInfo surveyReportInfo = existingInfo != null ? existingInfo : new SurveyReportInfo();
+
+        if (existingInfo != null) {
+            if (taskData.getPreFillSurveySnapshot() == null) {
+                taskData.setPreFillSurveySnapshot(ParseArtifactCleanupService.copySurveyReportSnapshot(existingInfo));
+            }
+            if (taskData.getPreFillRoomsSnapshot() == null) {
+                List<RoomInfo> existingRooms = mongoTemplate.find(query, RoomInfo.class);
+                taskData.setPreFillRoomsSnapshot(ParseArtifactCleanupService.copyRoomSnapshots(existingRooms));
+            }
+        } else {
+            taskData.setFillCreatedNewSurvey(true);
+        }
 
         // 2. 若不存在则新建
         if (existingInfo == null) {
@@ -219,11 +233,13 @@ public class DataFillReceiver {
         if (projectId == null) {
             return;
         }
-        try {
-            surveyReportContractApprovalSyncService.syncAllSurveyReportsInProject(projectId);
-        } catch (Exception ex) {
-            log.warn("同步实测报告合同/批文编号失败 projectId={}", projectId, ex);
-        }
+        runAfterCommit(() -> {
+            try {
+                surveyReportContractApprovalSyncService.syncAllSurveyReportsInProject(projectId);
+            } catch (Exception ex) {
+                log.warn("同步实测报告合同/批文编号失败 projectId={}", projectId, ex);
+            }
+        });
     }
 
     private void fillPlanningReviewData(TaskData taskData) {
@@ -237,10 +253,15 @@ public class DataFillReceiver {
         PlanningReviewForm existing = mongoTemplate.findOne(query, PlanningReviewForm.class);
         taskData.setPreFillPlanningFormExisted(existing != null);
         if (existing != null) {
-            taskData.setPreFillPlanningFormSnapshot(ParseArtifactCleanupService.copyPlanningFormSnapshot(existing));
-            List<PlanningReviewRow> existingRows = mongoTemplate.find(
-                    new Query(Criteria.where("file_record_id").is(fileRecordId)), PlanningReviewRow.class);
-            taskData.setPreFillPlanningRowsSnapshot(ParseArtifactCleanupService.copyPlanningRowSnapshots(existingRows));
+            if (taskData.getPreFillPlanningFormSnapshot() == null) {
+                taskData.setPreFillPlanningFormSnapshot(ParseArtifactCleanupService.copyPlanningFormSnapshot(existing));
+            }
+            if (taskData.getPreFillPlanningRowsSnapshot() == null) {
+                List<PlanningReviewRow> existingRows = mongoTemplate.find(
+                        new Query(Criteria.where("file_record_id").is(fileRecordId)), PlanningReviewRow.class);
+                taskData.setPreFillPlanningRowsSnapshot(
+                        ParseArtifactCleanupService.copyPlanningRowSnapshots(existingRows));
+            }
         }
 
         PlanningReviewForm target = existing != null ? existing : new PlanningReviewForm();
@@ -288,7 +309,7 @@ public class DataFillReceiver {
         Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
         CapacityIndicatorInfo existing = mongoTemplate.findOne(query, CapacityIndicatorInfo.class);
         taskData.setPreFillCapacityExisted(existing != null);
-        if (existing != null) {
+        if (existing != null && taskData.getPreFillCapacitySnapshot() == null) {
             taskData.setPreFillCapacitySnapshot(ParseArtifactCleanupService.copyCapacitySnapshot(existing));
         }
 
@@ -376,7 +397,7 @@ public class DataFillReceiver {
         Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
         ProjectPartySurveySummaryForm existing = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
         taskData.setPreFillPartySummaryExisted(existing != null);
-        if (existing != null) {
+        if (existing != null && taskData.getPreFillPartySummarySnapshot() == null) {
             taskData.setPreFillPartySummarySnapshot(ParseArtifactCleanupService.copyPartySummarySnapshot(existing));
         }
 
@@ -417,6 +438,23 @@ public class DataFillReceiver {
         if (applicationEventPublisher == null || event == null || !event.hasAnyId()) {
             return;
         }
+        runAfterCommit(() -> doPublish(event));
+    }
+
+    private void runAfterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+            return;
+        }
+        action.run();
+    }
+
+    private void doPublish(ProjectDataChangedEvent event) {
         try {
             applicationEventPublisher.publishEvent(event);
         } catch (Exception ex) {

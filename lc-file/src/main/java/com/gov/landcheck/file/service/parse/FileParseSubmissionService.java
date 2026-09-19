@@ -45,9 +45,6 @@ public class FileParseSubmissionService {
     @Resource
     private FileService fileService;
 
-    @Resource
-    private ParseArtifactCleanupService parseArtifactCleanupService;
-
     /**
      * 按文件记录 ID 查询最新一条解析任务（按创建时间降序）。
      */
@@ -127,7 +124,7 @@ public class FileParseSubmissionService {
                         "文件存储暂时不可用，请稍后再试");
             }
 
-            // 必须先原子抢占 PENDING，再清理业务数据；否则并发提交时失败者会清掉赢家的户室/回填数据。
+            // 只抢 PENDING；成功前不改业务表，避免 OCR/入队失败时丢掉上一轮成功数据。
             rollbackState = fileRecord.getFileState();
             acquired = false;
             if (fileRecordId != null) {
@@ -145,8 +142,6 @@ public class FileParseSubmissionService {
             if (!acquired) {
                 return SubmitParseResult.fail(String.valueOf(MessageConstant.PARAMS_ERROR_CODE), "文件解析任务已在进行中");
             }
-
-            resetBusinessStateBeforeParse(fileRecord);
 
             fileRecord.setFileState(FileStateEnum.PENDING);
             fileRecord.setAutoParseQueuedAt(null);
@@ -229,7 +224,4 @@ public class FileParseSubmissionService {
         }
     }
 
-    private void resetBusinessStateBeforeParse(FileRecord fileRecord) {
-        parseArtifactCleanupService.resetBusinessStateBeforeParse(fileRecord);
-    }
 }
