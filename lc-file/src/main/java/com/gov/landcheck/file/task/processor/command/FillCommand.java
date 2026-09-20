@@ -1,4 +1,4 @@
-ackage com.gov.landcheck.file.task.processor.command;
+package com.gov.landcheck.file.task.processor.command;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;

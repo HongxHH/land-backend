@@ -175,7 +175,6 @@ public class ParseFileTask implements Task {
             taskData.updateProgress(100);
             taskData.setCurrentStageStatus("SUCCESS");
             updateTaskStatus(ParseJobStateEnum.SUCCESS);
-            recordParseCompleteAudit();
         } catch (Exception e) {
             if (e instanceof TaskException taskEx
                     && TaskException.ErrorCode.TASK_CANCELLED.equals(taskEx.getErrorCode())) {
@@ -184,7 +183,12 @@ public class ParseFileTask implements Task {
             }
             log.error("更新任务成功状态失败: fileId={}, taskId={}, error={}",
                     taskData.getFileRecord().getId(), getTaskId(), e.getMessage(), e);
+            if (e instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new RuntimeException(e);
         }
+        recordParseCompleteAudit();
     }
 
     private void recordParseCompleteAudit() {
@@ -397,7 +401,7 @@ public class ParseFileTask implements Task {
     }
 
     /**
-     * 成功态：勘测报告、项目方汇总、文件记录与解析作业状态一致落库；优先走 Mongo 多文档事务，失败时退化为顺序提交。
+     * 成功态：勘测报告、项目方汇总、文件记录与解析作业状态一致落库，必须在 Mongo 多文档事务中完成。
      */
     private void persistParseSuccessState(MongoTemplate mongoTemplate, ParseJobUpdateService parseJobUpdateService) {
         taskData.markCompleted();

@@ -312,18 +312,15 @@ public class ProjectServiceImpl implements ProjectService {
                     directKeys.add(projectCacheKeys.roomsByProjectAndSurveyReport(projectId, sr.getId()));
                 }
             }
-            try {
-                TransactionTemplate tpl = new TransactionTemplate(transactionManager);
-                tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
-                tpl.executeWithoutResult(status -> deleteProjectPersistentData(projectId));
-            } catch (TransactionException | MongoTransactionException ex) {
-                log.warn("项目删除未能在 Mongo 事务中完成（常见于未启用副本集），将顺序执行删除: {}",
-                        ex.getMessage());
-                deleteProjectPersistentData(projectId);
-            }
+            TransactionTemplate tpl = new TransactionTemplate(transactionManager);
+            tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+            tpl.executeWithoutResult(status -> deleteProjectPersistentData(projectId));
             evictBeforeWrite(directKeys);
             evictAfterWrite(directKeys, projectCacheKeys.queryPattern());
             return AjaxJson.getSuccess("项目删除成功");
+        } catch (TransactionException | MongoTransactionException e) {
+            log.error("删除项目失败（Mongo 事务不可用）, projectId={}", projectId, e);
+            return AjaxJson.getError("删除项目失败：Mongo 事务不可用，请确认已启用副本集");
         } catch (Exception e) {
             log.error("删除项目失败, projectId={}", projectId, e);
             return AjaxJson.getError("删除项目失败");

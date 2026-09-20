@@ -6,8 +6,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * 用户级固定窗口限流（Redis），依赖 {@code landcheck.security.rate-limit.enabled} 与默认/覆盖参数。
- * 未登录时不限流（通常由 Sa-Token 先于本切面拦截）。
+ * 用户级固定窗口限流（Redis）
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)

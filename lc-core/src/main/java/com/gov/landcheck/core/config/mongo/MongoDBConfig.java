@@ -80,11 +80,8 @@ public class MongoDBConfig {
     }
 
     /**
-     * MongoDB事务管理器
-     * 支持多文档ACID事务操作
-     *
-     * @param dbFactory MongoDB数据库工厂
-     * @return MongoTransactionManager
+     * MongoDB 事务管理器。多文档事务要求副本集或 mongos；独立节点会在
+     * {@link MongoReplicaSetRequirement} 启动校验时失败。
      */
     @Bean
     PlatformTransactionManager transactionManager(MongoDatabaseFactory dbFactory) {
