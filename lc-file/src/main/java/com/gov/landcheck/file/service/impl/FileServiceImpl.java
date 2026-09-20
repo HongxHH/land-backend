@@ -1249,7 +1249,21 @@ public class FileServiceImpl implements FileService {
         if (projectId != null) {
             criteria = criteria.and("project_id").is(projectId);
         }
-        return findFileRecordIdsBySurveyReportCriteria(criteria);
+        return retainParseCompleteFileRecordIds(findFileRecordIdsBySurveyReportCriteria(criteria));
+    }
+
+    private List<Long> retainParseCompleteFileRecordIds(List<Long> fileRecordIds) {
+        if (CollectionUtils.isEmpty(fileRecordIds)) {
+            return List.of();
+        }
+        Query query = new Query(Criteria.where("_id").in(fileRecordIds)
+                .and("file_state").is(FileStateEnum.PARSE_COMPLETE));
+        query.fields().include("_id");
+        return mongoTemplate.find(query, FileRecord.class).stream()
+                .map(FileRecord::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private List<Long> findSurveyReportDecidedFileRecordIds(Long projectId) {
@@ -1257,7 +1271,7 @@ public class FileServiceImpl implements FileService {
         if (projectId != null) {
             criteria = criteria.and("project_id").is(projectId);
         }
-        return findFileRecordIdsBySurveyReportCriteria(criteria);
+        return retainParseCompleteFileRecordIds(findFileRecordIdsBySurveyReportCriteria(criteria));
     }
 
     private List<Long> findFileRecordIdsBySurveyReportCriteria(Criteria criteria) {

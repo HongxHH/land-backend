@@ -12,7 +12,6 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
@@ -139,12 +138,7 @@ public class ParseFillSnapshotService {
         TransactionTemplate tpl = new TransactionTemplate(transactionManager);
         tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
         tpl.setTimeout(RESTORE_TX_TIMEOUT_SECONDS);
-        try {
-            tpl.executeWithoutResult(status -> action.run());
-        } catch (TransactionException ex) {
-            log.warn("快照恢复未能走 Mongo 事务，降级为顺序写入: {}", ex.getMessage());
-            action.run();
-        }
+        tpl.executeWithoutResult(status -> action.run());
     }
 
     private ParseFillSnapshot buildSnapshot(ParseJob parseJob, FileRecord fileRecord) {

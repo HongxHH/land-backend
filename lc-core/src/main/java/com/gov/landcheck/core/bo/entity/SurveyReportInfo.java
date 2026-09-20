@@ -162,4 +162,12 @@ public class SurveyReportInfo extends MongoIdEntity {
     @Schema(description = "备注")
     private String remark;
 
+    /**
+     * 项目级「实测校验失败」判定：必须 is_parsed=1 且 is_verified=0。
+     * is_verified 为 null 表示本轮尚未校验（重解析 fill 后），不得当作失败。
+     */
+    public boolean isValidationFailed() {
+        return Integer.valueOf(1).equals(isParsed) && Integer.valueOf(0).equals(isVerified);
+    }
+
 }

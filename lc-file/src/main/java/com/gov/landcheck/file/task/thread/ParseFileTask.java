@@ -10,7 +10,6 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
@@ -324,18 +323,11 @@ public class ParseFileTask implements Task {
             }
 
             case SUCCESS -> {
-                try {
-                    PlatformTransactionManager txMgr = ApplicationContextProvider
-                            .getBean(PlatformTransactionManager.class);
-                    TransactionTemplate tpl = new TransactionTemplate(txMgr);
-                    tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
-                    tpl.executeWithoutResult(tx -> persistParseSuccessState(mongoTemplate, parseJobUpdateService));
-                } catch (TransactionException ex) {
-                    log.warn(
-                            "SUCCESS 落库未能在 Mongo 事务中完成（常见于未启用副本集），将顺序重试一次以保证可用性: {}",
-                            ex.getMessage());
-                    persistParseSuccessState(mongoTemplate, parseJobUpdateService);
-                }
+                PlatformTransactionManager txMgr = ApplicationContextProvider
+                        .getBean(PlatformTransactionManager.class);
+                TransactionTemplate tpl = new TransactionTemplate(txMgr);
+                tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+                tpl.executeWithoutResult(tx -> persistParseSuccessState(mongoTemplate, parseJobUpdateService));
                 deleteFillSnapshotQuietly();
             }
 

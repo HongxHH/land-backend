@@ -701,9 +701,7 @@ public class ProjectServiceImpl implements ProjectService {
             if (report == null || report.getProjectId() == null) {
                 continue;
             }
-            boolean parsed = report.getIsParsed() != null && report.getIsParsed() == 1;
-            boolean verifiedFailed = report.getIsVerified() != null && report.getIsVerified() == 0;
-            if (parsed && verifiedFailed) {
+            if (report.isValidationFailed()) {
                 map.put(report.getProjectId(), true);
             }
         }

@@ -1,4 +1,4 @@
-package com.gov.landcheck.file.task.processor.command;
+ackage com.gov.landcheck.file.task.processor.command;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -28,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class FillCommand extends AbstractCommand {
 
-    /** 只罩写库，不罩 OCR；副本集事务必须启用，失败不得降级为无事务替换。 */
+    /** 事务只罩写库，不罩 OCR；30 秒超时。 */
     private static final int FILL_TX_TIMEOUT_SECONDS = 30;
 
     @Resource

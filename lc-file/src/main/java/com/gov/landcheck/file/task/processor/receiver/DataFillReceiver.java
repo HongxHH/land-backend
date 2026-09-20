@@ -26,7 +26,9 @@ import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.service.SurveyReportContractApprovalSyncService;
+import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
+import com.gov.landcheck.file.service.parse.SurveyReportFieldUpdates;
 import com.gov.landcheck.file.task.base.TaskData;
 
 import jakarta.annotation.PostConstruct;
@@ -47,6 +49,9 @@ public class DataFillReceiver {
 
     @Autowired
     private SurveyReportContractApprovalSyncService surveyReportContractApprovalSyncService;
+
+    @Autowired
+    private UnknownUsageRecordService unknownUsageRecordService;
 
     private final Map<FileContextType, FillHandler> fillHandlers = new EnumMap<>(FileContextType.class);
 
@@ -198,11 +203,19 @@ public class DataFillReceiver {
             }
         }
 
+        if (existingInfo != null) {
+            SurveyReportFieldUpdates.applyComputedStatsReset(surveyReportInfo);
+        }
+
         if (existingInfo == null) {
             surveyReportInfo.preSave();
         }
         mongoTemplate.save(surveyReportInfo);
         taskData.setSurveyReportInfo(surveyReportInfo);
+
+        if (existingInfo != null) {
+            unknownUsageRecordService.deleteByFileRecordId(taskData.getFileRecord().getId());
+        }
 
         // 4. 回填房间信息
         List<RoomInfo> roomInfos = taskData.getRoomInfos();
