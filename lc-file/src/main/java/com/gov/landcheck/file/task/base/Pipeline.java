@@ -1,7 +1,6 @@
 package com.gov.landcheck.file.task.base;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
@@ -31,13 +30,6 @@ public class Pipeline {
      */
     public static PipelineBuilder of(String name) {
         return new PipelineBuilder(name);
-    }
-
-    /**
-     * 创建包含指定命令的管道
-     */
-    public static Pipeline of(Command... commands) {
-        return new Pipeline("DefaultPipeline", Arrays.asList(commands));
     }
 
     /**

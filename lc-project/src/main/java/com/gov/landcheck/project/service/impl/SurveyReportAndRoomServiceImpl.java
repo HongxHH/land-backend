@@ -36,7 +36,7 @@ import com.gov.landcheck.core.config.query.MongoQueryBuilder;
 import com.gov.landcheck.core.enums.FloorAreaTypeEnum;
 import com.gov.landcheck.core.enums.UsageCategoryEnum;
 import com.gov.landcheck.core.service.SurveyReportCalculationService;
-import com.gov.landcheck.core.util.RoomInfoValidator;
+import com.gov.landcheck.core.utils.RoomInfoValidator;
 import com.gov.landcheck.project.cache.ProjectCacheKeys;
 import com.gov.landcheck.project.dto.RoomInfoCreateDTO;
 import com.gov.landcheck.project.dto.RoomInfoQueryDTO;

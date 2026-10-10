@@ -48,10 +48,8 @@
         <guava.version>33.5.0-jre</guava.version>
         <hutool.version>5.8.42</hutool.version>
         <poi-ooxml.version>5.4.1</poi-ooxml.version>
-        <minio.version>8.2.2</minio.version>
         <commons-io.version>2.17.0</commons-io.version>
         <pdfbox.version>3.0.3</pdfbox.version>
-        <opencv.version>4.5.1-2</opencv.version>
         <jsoup.version>1.17.2</jsoup.version>
         <rocketmq.version>2.3.5</rocketmq.version>
     </properties>
@@ -111,11 +109,6 @@
                 <version>${poi-ooxml.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.minio</groupId>
-                <artifactId>minio</artifactId>
-                <version>${minio.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
                 <version>${commons-io.version}</version>
@@ -129,11 +122,6 @@
                 <groupId>org.apache.pdfbox</groupId>
                 <artifactId>pdfbox-tools</artifactId>
                 <version>${pdfbox.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.openpnp</groupId>
-                <artifactId>opencv</artifactId>
-                <version>${opencv.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.jsoup</groupId>

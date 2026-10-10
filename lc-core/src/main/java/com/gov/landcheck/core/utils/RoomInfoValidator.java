@@ -1,4 +1,4 @@
-package com.gov.landcheck.core.util;
+package com.gov.landcheck.core.utils;
 
 import org.springframework.util.StringUtils;
 
