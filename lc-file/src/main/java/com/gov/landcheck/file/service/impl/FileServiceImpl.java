@@ -1350,6 +1350,7 @@ public class FileServiceImpl implements FileService {
         String trimmed = gridFsId.trim();
         Criteria criteria = new Criteria().orOperator(
                 Criteria.where("gridfs_id").is(trimmed),
+                Criteria.where("preprocess_gridfs_id").is(trimmed),
                 Criteria.where("thumb_gridfs_id").is(trimmed));
         return mongoTemplate.exists(new Query(criteria), FileRecord.class);
     }

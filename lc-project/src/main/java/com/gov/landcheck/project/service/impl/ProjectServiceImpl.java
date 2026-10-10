@@ -483,7 +483,7 @@ public class ProjectServiceImpl implements ProjectService {
             return result;
         }
 
-        // 1) 文件级别：统计合同/实测文件数、解析失败、未解析
+        // 1) 文件级别：统计合同/实测/容量指标核查文件数，以及合同与实测的解析失败、未解析
         var fileStatsMap = batchBuildFileStatsByProjectId(projectIds);
 
         // 2) 实测校验级别：判断校验失败（isParsed=1 && isVerified=0）
@@ -501,6 +501,7 @@ public class ProjectServiceImpl implements ProjectService {
             if (stats != null) {
                 vo.setContractFileCount(stats.contractFileCount);
                 vo.setSurveyReportFileCount(stats.surveyReportFileCount);
+                vo.setCapacityIndicatorFileCount(stats.capacityIndicatorFileCount);
                 vo.setContractParseStatus(stats.contractParseStatus());
                 vo.setSurveyParseStatus(stats.surveyParseStatus());
 
@@ -514,6 +515,7 @@ public class ProjectServiceImpl implements ProjectService {
                 // 理论上不会发生：只要 project 存在就应该有 fileStatsMap entry
                 vo.setContractFileCount(0);
                 vo.setSurveyReportFileCount(0);
+                vo.setCapacityIndicatorFileCount(0);
                 vo.setContractParseStatus(com.gov.landcheck.core.enums.ContractParseStatusEnum.NOT_EXIST);
                 vo.setSurveyParseStatus(com.gov.landcheck.core.enums.SurveyParseStatusEnum.NOT_EXIST);
                 vo.setSurveyValidationStatus(com.gov.landcheck.core.enums.SurveyValidationStatusEnum.NOT_EXIST);
@@ -545,6 +547,8 @@ public class ProjectServiceImpl implements ProjectService {
     private static class FileStats {
         private Integer contractFileCount = 0;
         private Integer surveyReportFileCount = 0;
+        /** 仅用于列表展示，不参与项目状态判断 */
+        private Integer capacityIndicatorFileCount = 0;
 
         private boolean contractParseFailExists = false;
         private boolean surveyParseFailExists = false;
@@ -623,7 +627,8 @@ public class ProjectServiceImpl implements ProjectService {
 
         Query fileQuery = new Query(Criteria.where("project_id").in(projectIds)
                 .and("file_context_type").in(com.gov.landcheck.core.enums.FileContextType.CONTRACT,
-                        com.gov.landcheck.core.enums.FileContextType.SURVEY_REPORT));
+                        com.gov.landcheck.core.enums.FileContextType.SURVEY_REPORT,
+                        com.gov.landcheck.core.enums.FileContextType.CAPACITY_INDICATOR));
         // 仅投影统计字段，减少对象反序列化开销
         fileQuery.fields()
                 .include("project_id")
@@ -670,6 +675,8 @@ public class ProjectServiceImpl implements ProjectService {
                 if (!parseComplete) {
                     stats.surveyUnparsedExists = true;
                 }
+            } else if (fr.getFileContextType() == com.gov.landcheck.core.enums.FileContextType.CAPACITY_INDICATOR) {
+                stats.capacityIndicatorFileCount = stats.capacityIndicatorFileCount + 1;
             }
         }
 

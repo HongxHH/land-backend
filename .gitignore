@@ -39,6 +39,7 @@ build/
 .env
 **/.env
 !**/.env.example
+lc-start/src/main/resources/application-secret.yml
 
 python_demo/
 

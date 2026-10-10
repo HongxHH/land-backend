@@ -20,13 +20,13 @@ public class CapacityIndicatorFormUpdateDTO {
     @Schema(description = "是否已解析回填（0否 1是）")
     private Integer isParsed;
 
-    @Schema(description = "本次报建建筑面积-合计（平方米）")
+    @Schema(description = "至本次已报建总建筑面积-合计（平方米）")
     private BigDecimal totalArea;
 
-    @Schema(description = "本次报建建筑面积-商业类（平方米）")
+    @Schema(description = "至本次已报建总建筑面积-商业类（平方米）")
     private BigDecimal commercialArea;
 
-    @Schema(description = "本次报建建筑面积-住宅类（平方米）")
+    @Schema(description = "至本次已报建总建筑面积-住宅类（平方米）")
     private BigDecimal residentialArea;
 
     @Schema(description = "备注")

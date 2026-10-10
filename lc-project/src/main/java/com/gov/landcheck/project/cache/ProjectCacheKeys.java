@@ -62,7 +62,8 @@ public class ProjectCacheKeys {
     }
 
     public String queryProjectDetails(Object dto) {
-        return queryPrefix() + ":projectsDetail:q:" + stableKeyGenerator.hashOf(dto);
+        // v2：响应增加 capacityIndicatorFileCount，避免命中旧缓存后该字段为空
+        return queryPrefix() + ":projectsDetail:v2:q:" + stableKeyGenerator.hashOf(dto);
     }
 
     public String queryContracts(Object dto) {

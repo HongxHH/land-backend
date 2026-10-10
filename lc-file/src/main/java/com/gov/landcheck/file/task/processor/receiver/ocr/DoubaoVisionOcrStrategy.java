@@ -1,10 +1,23 @@
 package com.gov.landcheck.file.task.processor.receiver.ocr;
 
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,6 +47,11 @@ import lombok.extern.slf4j.Slf4j;
 public class DoubaoVisionOcrStrategy implements OcrProcessingStrategy {
 
     private static final int MAX_PAGE_LLM_ATTEMPTS = 3;
+
+    /** 超过该字节数的页面图先缩小并转 JPEG，避免视觉请求体过大被网关断开。 */
+    private static final int VISION_IMAGE_BYTE_LIMIT = 3 * 1024 * 1024;
+
+    private static final int VISION_LONG_EDGE_LIMIT = 2800;
 
     private static final String PLANNING_REVIEW_JSON_REPAIR_SUFFIX = """
 
@@ -84,9 +102,9 @@ public class DoubaoVisionOcrStrategy implements OcrProcessingStrategy {
     public OCRProcessResult process(TaskData taskData) throws Exception {
         long start = System.currentTimeMillis();
         var fileRecord = taskData.getFileRecord();
-        String targetGridfsId = StringUtils.hasText(taskData.getPreprocessGridfsId())
-                ? taskData.getPreprocessGridfsId()
-                : fileRecord.getGridfsId();
+        boolean useOriginal = fileRecord.getFileContextType() == FileContextType.CAPACITY_INDICATOR
+                || !StringUtils.hasText(taskData.getPreprocessGridfsId());
+        String targetGridfsId = useOriginal ? fileRecord.getGridfsId() : taskData.getPreprocessGridfsId();
 
         FileContextType contextType = fileRecord.getFileContextType();
         String instruction = resolveVisionInstruction(contextType);
@@ -260,8 +278,13 @@ public class DoubaoVisionOcrStrategy implements OcrProcessingStrategy {
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(Map.of("type", "text", "text", instruction));
 
-        String b64 = Base64.getEncoder().encodeToString(png);
-        String dataUrl = "data:image/png;base64," + b64;
+        byte[] image = fitVisionImage(png);
+        String mime = image == png ? "image/png" : "image/jpeg";
+        if (image != png || image.length > 1_048_576) {
+            log.info("视觉页图片: bytes={} format={}", image.length, mime);
+        }
+        String b64 = Base64.getEncoder().encodeToString(image);
+        String dataUrl = "data:" + mime + ";base64," + b64;
         Map<String, Object> imageUrl = new HashMap<>();
         imageUrl.put("url", dataUrl);
         Map<String, Object> imagePart = new HashMap<>();
@@ -275,5 +298,89 @@ public class DoubaoVisionOcrStrategy implements OcrProcessingStrategy {
 
         List<Map<String, Object>> messages = List.of(userMessage);
         return llmService.chatCompletionMultimodal(messages, temperature, maxTokens, null);
+    }
+
+    private byte[] fitVisionImage(byte[] png) {
+        if (png == null || png.length <= VISION_IMAGE_BYTE_LIMIT) {
+            return png;
+        }
+        try {
+            BufferedImage source = ImageIO.read(new ByteArrayInputStream(png));
+            if (source == null) {
+                return png;
+            }
+            try {
+                BufferedImage scaled = scaleLongEdge(source, VISION_LONG_EDGE_LIMIT);
+                byte[] jpeg = writeJpeg(scaled, 0.82f);
+                if (jpeg.length > VISION_IMAGE_BYTE_LIMIT) {
+                    BufferedImage smaller = scaleLongEdge(scaled, 2000);
+                    jpeg = writeJpeg(smaller, 0.72f);
+                    if (smaller != scaled) {
+                        smaller.flush();
+                    }
+                }
+                if (scaled != source) {
+                    scaled.flush();
+                }
+                log.info("视觉页图片压缩: pngBytes={} jpegBytes={}", png.length, jpeg.length);
+                return jpeg;
+            } finally {
+                source.flush();
+            }
+        } catch (Exception ex) {
+            log.warn("视觉页图片压缩失败，仍发送原图: {}", ex.getMessage());
+            return png;
+        }
+    }
+
+    private static BufferedImage scaleLongEdge(BufferedImage source, int maxEdge) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+        int longEdge = Math.max(width, height);
+        if (longEdge <= maxEdge) {
+            return source;
+        }
+        double ratio = maxEdge / (double) longEdge;
+        int targetWidth = Math.max(1, (int) Math.round(width * ratio));
+        int targetHeight = Math.max(1, (int) Math.round(height * ratio));
+        BufferedImage scaled = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = scaled.createGraphics();
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        graphics.setColor(Color.WHITE);
+        graphics.fillRect(0, 0, targetWidth, targetHeight);
+        graphics.drawImage(source, 0, 0, targetWidth, targetHeight, null);
+        graphics.dispose();
+        return scaled;
+    }
+
+    private static byte[] writeJpeg(BufferedImage image, float quality) throws Exception {
+        BufferedImage rgb = image;
+        if (image.getType() != BufferedImage.TYPE_INT_RGB) {
+            rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics = rgb.createGraphics();
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, rgb.getWidth(), rgb.getHeight());
+            graphics.drawImage(image, 0, 0, null);
+            graphics.dispose();
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+        if (!writers.hasNext()) {
+            throw new IllegalStateException("没有可用的 JPEG 编码器");
+        }
+        ImageWriter writer = writers.next();
+        ImageWriteParam param = writer.getDefaultWriteParam();
+        param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+        param.setCompressionQuality(quality);
+        try (ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {
+            writer.setOutput(ios);
+            writer.write(null, new IIOImage(rgb, null, null), param);
+        } finally {
+            writer.dispose();
+            if (rgb != image) {
+                rgb.flush();
+            }
+        }
+        return out.toByteArray();
     }
 }

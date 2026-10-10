@@ -39,15 +39,15 @@ public class CapacityIndicatorInfo extends MongoIdEntity {
     private Integer isParsed;
 
     @Field(name = "total_area")
-    @Schema(description = "本次报建建筑面积-合计（平方米）", example = "206591.2400")
+    @Schema(description = "至本次已报建总建筑面积-合计（平方米）", example = "206591.2400")
     private BigDecimal totalArea;
 
     @Field(name = "commercial_area")
-    @Schema(description = "本次报建建筑面积-商业类（平方米）", example = "1158.4100")
+    @Schema(description = "至本次已报建总建筑面积-商业类（平方米）", example = "1158.4100")
     private BigDecimal commercialArea;
 
     @Field(name = "residential_area")
-    @Schema(description = "本次报建建筑面积-住宅类（平方米）", example = "205432.8300")
+    @Schema(description = "至本次已报建总建筑面积-住宅类（平方米）", example = "205432.8300")
     private BigDecimal residentialArea;
 
     @Field(name = "remark")

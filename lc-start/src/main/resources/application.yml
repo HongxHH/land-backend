@@ -5,6 +5,8 @@ server:
 debug: false
 
 spring:
+  config:
+    import: optional:classpath:application-secret.yml
   profiles:
     default: local
   threads:
@@ -139,8 +141,8 @@ landcheck:
       url: https://ark.cn-beijing.volces.com/api/v3
       key: ${LANDCHECK_LLM_API_KEY:}
       timeout-seconds: 240
-      model: doubao-seed-2-0-pro-260215
-      vision-model: doubao-seed-2-0-pro-260215
+      model: doubao-seed-2-1-pro-260915
+      vision-model: doubao-seed-2-1-pro-260915
 
 rocketmq:
   name-server: 127.0.0.1:9876

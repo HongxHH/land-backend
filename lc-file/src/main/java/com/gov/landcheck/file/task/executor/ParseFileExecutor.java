@@ -27,8 +27,7 @@ import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 任务执行器
- * 执行完整的文件解析流程：预处理 -> OCR -> 数据解析 -> 数据回填 -> 数据校验
+ * 文件解析任务执行器 ：预处理 -> OCR -> 数据解析 -> 数据回填 -> 数据校验
  */
 @Slf4j
 @Service
@@ -121,6 +120,7 @@ public class ParseFileExecutor {
      * 按文件内容类型动态拼装解析链路：
      * - 实测：全链路（含校验）
      * - 合同/规划复核：不做校验
+     * - 容量指标核查表：跳过预处理，视觉识别直接使用原文件
      * - 项目方汇总：直达解析回填（跳过预处理/OCR）
      * <p>
      * 阶段顺序需与 {@link ParsePipelinePlan#stagesFor(FileContextType)} 保持一致。
@@ -139,6 +139,11 @@ public class ParseFileExecutor {
                 commands.add(parseCommand);
                 commands.add(fillCommand);
                 commands.add(validateCommand);
+            }
+            case CAPACITY_INDICATOR -> {
+                commands.add(ocrCommand);
+                commands.add(parseCommand);
+                commands.add(fillCommand);
             }
             default -> {
                 commands.add(preprocessCommand);

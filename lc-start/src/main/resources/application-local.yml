@@ -31,6 +31,3 @@ landcheck:
       - /doc.html
       - /webjars/**
       - /favicon.ico
-  llm:
-    api:
-      key: ${LANDCHECK_LLM_API_KEY:}

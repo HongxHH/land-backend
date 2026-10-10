@@ -113,7 +113,7 @@ public class FileController {
     }
 
     @GetMapping("/download/gridfs/{gridFsId}")
-    @Operation(summary = "根据GridFS ID下载文件", description = "仅允许下载已登记在 FileRecord 上的主文件或缩略图 GridFS")
+    @Operation(summary = "根据GridFS ID下载文件", description = "仅允许下载已登记在 FileRecord 上的主文件、预处理文件或缩略图 GridFS")
     public ResponseEntity<Object> downloadFileByGridFsId(
             @Parameter(description = "GridFS文件id") @PathVariable String gridFsId) throws IOException {
         if (!fileService.isRegisteredGridFsId(gridFsId)) {

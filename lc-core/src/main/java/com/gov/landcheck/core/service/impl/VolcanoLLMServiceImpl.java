@@ -1,5 +1,12 @@
 package com.gov.landcheck.core.service.impl;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -8,20 +15,16 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestTemplate;
 
 import jakarta.annotation.PostConstruct;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gov.landcheck.core.service.LLMService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -54,7 +57,9 @@ public class VolcanoLLMServiceImpl implements LLMService {
     @Value("${landcheck.llm.http.max-attempts:3}")
     private int maxHttpAttempts;
 
-    private RestTemplate restTemplate;
+    private HttpClient httpClient;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 默认参数
     private static final Double DEFAULT_TEMPERATURE = 0.1;
@@ -250,21 +255,21 @@ public class VolcanoLLMServiceImpl implements LLMService {
             """;
 
     /**
-     * 容量指标核查表多模态识别（单页）：提取「本次报建建筑面积」下合计/商业类/住宅类三列数值。
+     * 容量指标核查表多模态识别（单页）：提取「至本次已报建总建筑面积」下合计/商业类/住宅类三列数值。
      */
     public static final String CAPACITY_INDICATOR_VISION_SINGLE_PAGE_INSTRUCTION = """
             你是建筑工程文档识别助手。当前图片是「容量指标核查表」PDF 的唯一一页扫描件。
             请只根据图中可见内容抽取结构化数据，不要猜测；看不清或没有的字段用 null；数值只输出数字（不要单位、千分位）。
 
-            任务：在表格中找到标题为「本次报建建筑面积（平方米）」的区域。该区域下方有四列子标题：
+            任务：在表格中找到标题为「至本次已报建总建筑面积（平方米）」的区域。该区域下方有四列子标题：
             「合计」「商业类」「住宅类」「其它」。
             定位与「计入容积率的建筑面积」同一数据行（若行标题表述略有差异，选取该四列下的第一行有效数值行）。
             仅提取前三个数值列，忽略「其它」列。
 
             禁止读取以下区域的数值：
+            - 「本次报建建筑面积（平方米）」
             - 「已报建建筑面积（平方米）」
             - 「总建筑面积指标（平方米）」
-            - 「至本次已报建总建筑面积（平方米）」
             - 「剩余建筑面积指标」等其他区块
 
             数值必须以单元格原文为准，禁止用商业类+住宅类推算合计。
@@ -283,12 +288,12 @@ public class VolcanoLLMServiceImpl implements LLMService {
             """;
 
     @PostConstruct
-    void initRestTemplate() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        int ms = Math.max(1, apiTimeoutSeconds) * 1000;
-        factory.setConnectTimeout(ms);
-        factory.setReadTimeout(ms);
-        this.restTemplate = new RestTemplate(factory);
+    void initHttpClient() {
+        int seconds = Math.max(1, apiTimeoutSeconds);
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(seconds))
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
     }
 
     private static void sleepBackoffMillis(long millis) {
@@ -357,10 +362,6 @@ public class VolcanoLLMServiceImpl implements LLMService {
             throws Exception {
         String url = apiUrl + "/chat/completions";
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(apiKey);
-
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", modelName);
         requestBody.put("messages", messages);
@@ -370,19 +371,42 @@ public class VolcanoLLMServiceImpl implements LLMService {
             requestBody.put("max_tokens", maxTokens);
         }
 
-        HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
+        byte[] body = objectMapper.writeValueAsBytes(requestBody);
+        log.info("LLM 请求: model={} bytes={}", modelName, body.length);
 
-        ResponseEntity<Map<String, Object>> responseEntity = restTemplate.exchange(url,
-                org.springframework.http.HttpMethod.POST, requestEntity,
-                new org.springframework.core.ParameterizedTypeReference<>() {
-                });
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(Math.max(1, apiTimeoutSeconds)))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .build();
 
-        if (responseEntity.getStatusCode() != HttpStatus.OK) {
-            throw new Exception("API请求失败，状态码: " + responseEntity.getStatusCode()
-                    + ", 响应: " + responseEntity.getBody());
+        HttpResponse<String> httpResponse;
+        try {
+            httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new ResourceAccessException(
+                    "I/O error on POST request for \"" + url + "\" bytes=" + body.length + ": " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new Exception("LLM 请求被中断 bytes=" + body.length, e);
         }
 
-        Map<String, Object> response = responseEntity.getBody();
+        int status = httpResponse.statusCode();
+        String responseText = httpResponse.body() == null ? "" : httpResponse.body();
+        if (status != 200) {
+            byte[] responseBytes = responseText.getBytes(StandardCharsets.UTF_8);
+            HttpStatusCode statusCode = HttpStatusCode.valueOf(status);
+            if (status >= 500) {
+                throw HttpServerErrorException.create(statusCode, "", new HttpHeaders(), responseBytes,
+                        StandardCharsets.UTF_8);
+            }
+            throw HttpClientErrorException.create(statusCode, "", new HttpHeaders(), responseBytes,
+                    StandardCharsets.UTF_8);
+        }
+
+        Map<String, Object> response = objectMapper.readValue(responseText, Map.class);
         if (response == null || !response.containsKey("choices")) {
             throw new Exception("API响应格式错误: " + response);
         }

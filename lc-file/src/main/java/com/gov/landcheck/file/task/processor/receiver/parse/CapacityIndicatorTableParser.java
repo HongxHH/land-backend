@@ -17,7 +17,7 @@ import com.gov.landcheck.file.dto.ParseResult;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 容量指标核查表：解析多模态 JSON，提取本次报建建筑面积三列数值。
+ * 容量指标核查表：解析多模态 JSON，提取至本次已报建总建筑面积三列数值。
  */
 @Slf4j
 @Service

@@ -32,6 +32,10 @@ public final class ParsePipelinePlan {
                     new StageDef("PARSE", "数据解析"),
                     new StageDef("FILL", "数据回填"),
                     new StageDef("VALIDATE", "数据校验"));
+            case CAPACITY_INDICATOR -> List.of(
+                    new StageDef("OCR", "OCR识别"),
+                    new StageDef("PARSE", "数据解析"),
+                    new StageDef("FILL", "数据回填"));
             default -> defaultContractLikeStages();
         };
     }

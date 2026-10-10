@@ -41,6 +41,9 @@ public class ProjectDetailVO {
     @Schema(description = "合同文件数量", example = "3")
     private Integer contractFileCount;
 
+    @Schema(description = "容量指标核查表文件数量", example = "2")
+    private Integer capacityIndicatorFileCount;
+
     @Schema(description = "总的合同约定建筑面积（㎡），无记录则返回 null", example = "50000.0000")
     private BigDecimal contractAgreedTotalBuildingArea;
 
