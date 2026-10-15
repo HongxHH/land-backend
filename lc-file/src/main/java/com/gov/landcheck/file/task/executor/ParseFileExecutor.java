@@ -2,6 +2,7 @@ package com.gov.landcheck.file.task.executor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,12 +18,13 @@ import com.gov.landcheck.file.task.base.Pipeline;
 import com.gov.landcheck.file.task.base.PipelineBuilder;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
+import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
+import com.gov.landcheck.file.task.plan.ParsePipelinePlan.StageDef;
 import com.gov.landcheck.file.task.processor.command.FillCommand;
 import com.gov.landcheck.file.task.processor.command.OCRCommand;
 import com.gov.landcheck.file.task.processor.command.ParseCommand;
 import com.gov.landcheck.file.task.processor.command.PreprocessCommand;
 import com.gov.landcheck.file.task.processor.command.ValidateCommand;
-import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -34,28 +36,25 @@ import lombok.extern.slf4j.Slf4j;
 public class ParseFileExecutor {
 
     @Autowired
-    private PreprocessCommand preprocessCommand;
-
-    @Autowired
-    private OCRCommand ocrCommand;
-
-    @Autowired
-    private ParseCommand parseCommand;
-
-    @Autowired
-    private FillCommand fillCommand;
-
-    @Autowired
-    private ValidateCommand validateCommand;
-
-    @Autowired
     private ParseArtifactCleanupService parseArtifactCleanupService;
 
     private final ProcessingConcurrencyGate parsePipelineGate;
+    private final Map<String, Command> commandsByStage;
 
     public ParseFileExecutor(
-            @Qualifier(FileProcessingConfig.PARSE_PIPELINE_GATE) ProcessingConcurrencyGate parsePipelineGate) {
+            @Qualifier(FileProcessingConfig.PARSE_PIPELINE_GATE) ProcessingConcurrencyGate parsePipelineGate,
+            PreprocessCommand preprocessCommand,
+            OCRCommand ocrCommand,
+            ParseCommand parseCommand,
+            FillCommand fillCommand,
+            ValidateCommand validateCommand) {
         this.parsePipelineGate = parsePipelineGate;
+        this.commandsByStage = Map.of(
+                preprocessCommand.getStage(), preprocessCommand,
+                ocrCommand.getStage(), ocrCommand,
+                parseCommand.getStage(), parseCommand,
+                fillCommand.getStage(), fillCommand,
+                validateCommand.getStage(), validateCommand);
     }
 
     public void execute(TaskData taskData) throws Exception {
@@ -108,7 +107,7 @@ public class ParseFileExecutor {
         FileContextType contextType = taskData != null && taskData.getFileRecord() != null
                 ? taskData.getFileRecord().getFileContextType()
                 : null;
-        List<Command> commands = resolveCommands(contextType);
+        List<Command> commands = commandsFor(contextType, commandsByStage);
         PipelineBuilder builder = Pipeline.of("FileProcessingPipeline");
         for (Command command : commands) {
             builder.add(command);
@@ -117,40 +116,22 @@ public class ParseFileExecutor {
     }
 
     /**
-     * 按文件内容类型动态拼装解析链路：
-     * - 实测：全链路（含校验）
-     * - 合同/规划复核：不做校验
-     * - 容量指标核查表：跳过预处理，视觉识别直接使用原文件
-     * - 项目方汇总：直达解析回填（跳过预处理/OCR）
-     * <p>
-     * 阶段顺序需与 {@link ParsePipelinePlan#stagesFor(FileContextType)} 保持一致。
-     * </p>
+     * 按 {@link ParsePipelinePlan#stagesFor(FileContextType)} 的顺序取命令。
+     * 空文件类型在这里失败，不走计划表对 null 的默认链路。
      */
-    private List<Command> resolveCommands(FileContextType contextType) {
-        List<Command> commands = new ArrayList<>();
-        switch (contextType) {
-            case PROJECT_PARTY_SURVEY_SUMMARY -> {
-                commands.add(parseCommand);
-                commands.add(fillCommand);
+    static List<Command> commandsFor(FileContextType contextType, Map<String, Command> commandsByStage) {
+        if (contextType == null) {
+            throw new IllegalStateException("解析管道缺少文件内容类型，无法确定执行阶段");
+        }
+        List<StageDef> stages = ParsePipelinePlan.stagesFor(contextType);
+        List<Command> commands = new ArrayList<>(stages.size());
+        for (StageDef stage : stages) {
+            Command command = commandsByStage.get(stage.code());
+            if (command == null) {
+                throw new IllegalStateException(
+                        "解析管道无法执行阶段 " + stage.code() + "，文件类型 " + contextType);
             }
-            case SURVEY_REPORT -> {
-                commands.add(preprocessCommand);
-                commands.add(ocrCommand);
-                commands.add(parseCommand);
-                commands.add(fillCommand);
-                commands.add(validateCommand);
-            }
-            case CAPACITY_INDICATOR -> {
-                commands.add(ocrCommand);
-                commands.add(parseCommand);
-                commands.add(fillCommand);
-            }
-            default -> {
-                commands.add(preprocessCommand);
-                commands.add(ocrCommand);
-                commands.add(parseCommand);
-                commands.add(fillCommand);
-            }
+            commands.add(command);
         }
         return commands;
     }
