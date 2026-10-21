@@ -20,6 +20,7 @@ import com.gov.landcheck.core.enums.FloorAreaTypeEnum;
 import com.gov.landcheck.core.service.SurveyReportCalculationService;
 import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.core.service.UsageConfigService;
+import com.gov.landcheck.core.utils.RoomInfoValidator;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -91,7 +92,7 @@ public class SurveyReportCalculationServiceImpl implements SurveyReportCalculati
                 roomInfo.setIsCalculate(0);
                 roomInfo.setUsageCategory("UNKNOWN");
                 roomInfo.setFloorAreaType(FloorAreaTypeEnum.UNKNOWN);
-                unknownUsages.put(roomInfo.getRoomNumber(), SurveyReportUsageLabels.MISSING_USAGE_LABEL);
+                unknownUsages.put(pendingUsageKey(roomInfo), SurveyReportUsageLabels.MISSING_USAGE_LABEL);
                 continue;
             }
 
@@ -150,7 +151,7 @@ public class SurveyReportCalculationServiceImpl implements SurveyReportCalculati
                 roomInfo.setIsCalculate(0);
                 roomInfo.setUsageCategory("UNKNOWN");
                 roomInfo.setFloorAreaType(FloorAreaTypeEnum.UNKNOWN);
-                unknownUsages.put(roomInfo.getRoomNumber(), usage);
+                unknownUsages.put(pendingUsageKey(roomInfo), usage);
 
                 // 记录未知用途
                 unknownUsageRecordService.recordUnknownUsage(
@@ -272,6 +273,14 @@ public class SurveyReportCalculationServiceImpl implements SurveyReportCalculati
         }
         calculateUsageSums(surveyReportInfo, roomInfos);
         return validateSurveyReport(surveyReportInfo);
+    }
+
+    /** 待确认名单按楼层+房号区分，避免同房号不同楼层互相覆盖。 */
+    private static String pendingUsageKey(RoomInfo roomInfo) {
+        if (roomInfo == null) {
+            return "";
+        }
+        return RoomInfoValidator.buildIdentityKey(roomInfo.getRoomLevel(), roomInfo.getRoomNumber());
     }
 
     /**
