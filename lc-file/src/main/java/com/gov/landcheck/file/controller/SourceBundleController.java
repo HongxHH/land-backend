@@ -138,11 +138,11 @@ public class SourceBundleController {
             if (!plan.downloadable()) {
                 return plain(HttpStatus.NOT_FOUND, "当前项目没有可下载的原件");
             }
-            sourceBundleService.auditDownload(plan, projectId, consumed);
             extendDownloadTimeout(request, response, release);
             StreamingResponseBody body = output -> {
                 try {
                     sourceBundleService.write(plan, output);
+                    sourceBundleService.auditDownload(plan, projectId, consumed);
                 } catch (RuntimeException | IOException ex) {
                     log.warn("原件打包写出失败: projectId={}, userId={}, error={}", projectId, consumed.userId(),
                             ex.getMessage());

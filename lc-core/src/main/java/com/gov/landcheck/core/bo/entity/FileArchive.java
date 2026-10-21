@@ -16,7 +16,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * 归档文件夹实体
- * 每个项目默认存在多类归档夹：合同、实测报告、容量指标核查表、项目方实测汇总表、其他未归档文件等。
+ * 每个项目默认存在多类归档夹：合同、实测报告、规划复核表、容量指标核查表、项目方实测汇总表、其他未归档文件等。
  *
  * 
  * @author system
@@ -41,7 +41,7 @@ public class FileArchive extends MongoIdEntity {
     private String name;
 
     @Field(name = "kind")
-    @Schema(description = "归档类型，与 FileContextType 对应：CONTRACT/SURVEY_REPORT/CAPACITY_INDICATOR/PROJECT_PARTY_SURVEY_SUMMARY/OTHER")
+    @Schema(description = "归档类型，与 FileContextType 对应：CONTRACT/SURVEY_REPORT/PLANNING_REVIEW/CAPACITY_INDICATOR/PROJECT_PARTY_SURVEY_SUMMARY/OTHER")
     private FileContextType kind;
 
     @Field(name = "is_default")
