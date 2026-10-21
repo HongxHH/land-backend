@@ -2,12 +2,16 @@ package com.gov.landcheck.file.task.plan;
 
 import java.util.List;
 
-import com.gov.landcheck.core.enums.FileContextType;
-
 /**
- * 用于进度可视化
+ * 解析阶段定义。各文件类型的阶段列表由对应 {@link com.gov.landcheck.file.task.context.FileParseModule} 提供。
  */
 public final class ParsePipelinePlan {
+
+    public static final StageDef PREPROCESS = new StageDef("PREPROCESS", "PDF预处理");
+    public static final StageDef OCR = new StageDef("OCR", "OCR识别");
+    public static final StageDef PARSE = new StageDef("PARSE", "数据解析");
+    public static final StageDef FILL = new StageDef("FILL", "数据回填");
+    public static final StageDef VALIDATE = new StageDef("VALIDATE", "数据校验");
 
     private ParsePipelinePlan() {
     }
@@ -16,35 +20,9 @@ public final class ParsePipelinePlan {
     }
 
     /**
-     * 按文件内容类型返回实际会执行的解析阶段（不含被跳过的阶段）。
+     * 未注册文件类型的默认阶段（合同同类：预处理 → OCR → 解析 → 回填）。
      */
-    public static List<StageDef> stagesFor(FileContextType contextType) {
-        if (contextType == null) {
-            return defaultContractLikeStages();
-        }
-        return switch (contextType) {
-            case PROJECT_PARTY_SURVEY_SUMMARY -> List.of(
-                    new StageDef("PARSE", "数据解析"),
-                    new StageDef("FILL", "数据回填"));
-            case SURVEY_REPORT -> List.of(
-                    new StageDef("PREPROCESS", "PDF预处理"),
-                    new StageDef("OCR", "OCR识别"),
-                    new StageDef("PARSE", "数据解析"),
-                    new StageDef("FILL", "数据回填"),
-                    new StageDef("VALIDATE", "数据校验"));
-            case CAPACITY_INDICATOR -> List.of(
-                    new StageDef("OCR", "OCR识别"),
-                    new StageDef("PARSE", "数据解析"),
-                    new StageDef("FILL", "数据回填"));
-            default -> defaultContractLikeStages();
-        };
-    }
-
-    private static List<StageDef> defaultContractLikeStages() {
-        return List.of(
-                new StageDef("PREPROCESS", "PDF预处理"),
-                new StageDef("OCR", "OCR识别"),
-                new StageDef("PARSE", "数据解析"),
-                new StageDef("FILL", "数据回填"));
+    public static List<StageDef> defaultStages() {
+        return List.of(PREPROCESS, OCR, PARSE, FILL);
     }
 }

@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.task.base.Command;
-import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
+import com.gov.landcheck.file.task.context.FileParseModulesFixture;
+import com.gov.landcheck.file.task.plan.ParsePipelinePlan.StageDef;
 import com.gov.landcheck.file.task.processor.command.FillCommand;
 import com.gov.landcheck.file.task.processor.command.OCRCommand;
 import com.gov.landcheck.file.task.processor.command.ParseCommand;
@@ -31,12 +33,13 @@ class ParseFileExecutorCommandsTest {
         @Test
         void eachFileTypeKeepsItsCurrentStages() {
                 Map<String, Command> commands = realCommands();
+                FileParseModuleRegistry registry = FileParseModulesFixture.registry();
                 assertEquals(FileContextType.values().length, EXPECTED_STAGES.size());
                 for (FileContextType contextType : FileContextType.values()) {
-                        List<String> planned = ParsePipelinePlan.stagesFor(contextType).stream()
-                                        .map(ParsePipelinePlan.StageDef::code)
+                        List<String> planned = registry.stagesFor(contextType).stream()
+                                        .map(StageDef::code)
                                         .toList();
-                        List<String> resolved = ParseFileExecutor.commandsFor(contextType, commands).stream()
+                        List<String> resolved = ParseFileExecutor.commandsFor(contextType, commands, registry).stream()
                                         .map(Command::getStage)
                                         .toList();
                         assertEquals(EXPECTED_STAGES.get(contextType), planned, contextType.name());
@@ -47,7 +50,8 @@ class ParseFileExecutorCommandsTest {
         @Test
         void missingFileTypeFailsBeforeAnyStage() {
                 IllegalStateException error = assertThrows(IllegalStateException.class,
-                                () -> ParseFileExecutor.commandsFor(null, realCommands()));
+                                () -> ParseFileExecutor.commandsFor(null, realCommands(),
+                                                FileParseModulesFixture.registry()));
                 assertEquals("解析管道缺少文件内容类型，无法确定执行阶段", error.getMessage());
         }
 
@@ -57,7 +61,8 @@ class ParseFileExecutorCommandsTest {
                                 "PARSE", new ParseCommand(),
                                 "FILL", new FillCommand());
                 IllegalStateException error = assertThrows(IllegalStateException.class,
-                                () -> ParseFileExecutor.commandsFor(FileContextType.CAPACITY_INDICATOR, commands));
+                                () -> ParseFileExecutor.commandsFor(FileContextType.CAPACITY_INDICATOR, commands,
+                                                FileParseModulesFixture.registry()));
                 assertEquals("解析管道无法执行阶段 OCR，文件类型 CAPACITY_INDICATOR", error.getMessage());
         }
 

@@ -1,4 +1,4 @@
-package com.gov.landcheck.file.task.processor.command;
+package com.gov.landcheck.file.task.context;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,12 +11,12 @@ import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.task.base.TaskData;
 
-class FillCommandSkipTest {
+class ProjectPartySummaryParseModuleSkipTest {
 
     @Test
     void skipPartialPartySummaryWithoutTotals() {
         TaskData taskData = partySummaryTask("PARTIAL", null);
-        assertTrue(FillCommand.shouldSkipProjectPartyFillWithoutTotals(taskData));
+        assertTrue(ProjectPartySummaryParseModule.shouldSkipFillWithoutTotals(taskData));
     }
 
     @Test
@@ -24,7 +24,7 @@ class FillCommandSkipTest {
         ProjectPartyDeclaredTotals totals = new ProjectPartyDeclaredTotals();
         totals.setContractAgreedTotalBuildingArea(java.math.BigDecimal.TEN);
         TaskData taskData = partySummaryTask("PARTIAL", totals);
-        assertFalse(FillCommand.shouldSkipProjectPartyFillWithoutTotals(taskData));
+        assertFalse(ProjectPartySummaryParseModule.shouldSkipFillWithoutTotals(taskData));
     }
 
     @Test
@@ -32,7 +32,7 @@ class FillCommandSkipTest {
         FileRecord fileRecord = new FileRecord();
         fileRecord.setFileContextType(FileContextType.SURVEY_REPORT);
         TaskData taskData = new TaskData(fileRecord);
-        assertFalse(FillCommand.shouldSkipProjectPartyFillWithoutTotals(taskData));
+        assertFalse(ProjectPartySummaryParseModule.shouldSkipFillWithoutTotals(taskData));
     }
 
     private static TaskData partySummaryTask(String parseStatus, ProjectPartyDeclaredTotals totals) {

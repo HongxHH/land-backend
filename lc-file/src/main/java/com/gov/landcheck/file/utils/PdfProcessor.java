@@ -1,5 +1,15 @@
 package com.gov.landcheck.file.utils;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import javax.imageio.ImageIO;
+
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -10,12 +20,6 @@ import org.springframework.stereotype.Component;
 import com.gov.landcheck.file.config.FileProcessingProperties;
 
 import jakarta.annotation.Resource;
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 
 /**
  * PDF处理工具类
@@ -36,24 +40,16 @@ public class PdfProcessor {
     }
 
     /**
-     * 根据 PDF 首页生成预览图并存储到 MongoDB GridFS。
+     * 从本地 PDF 路径生成首页预览图（落盘文件，避免整文件进堆）。
      */
-    public String generateThumbnail(InputStream pdfInputStream) {
-        try {
-            return generateThumbnail(readInputStreamToBytes(pdfInputStream));
-        } catch (IOException e) {
-            throw new RuntimeException("生成PDF预览图失败", e);
+    public String generateThumbnailFromPath(Path pdfPath) {
+        if (pdfPath == null || !Files.isRegularFile(pdfPath)) {
+            throw new RuntimeException("PDF临时文件不存在");
         }
-    }
-
-    /**
-     * 根据 PDF 字节数组生成预览图，避免 InputStream 二次读取。
-     */
-    public String generateThumbnail(byte[] pdfBytes) {
         PDDocument document = null;
         BufferedImage image = null;
         try {
-            document = Loader.loadPDF(pdfBytes);
+            document = Loader.loadPDF(pdfPath.toFile());
             if (document.getNumberOfPages() == 0) {
                 throw new RuntimeException("PDF文件没有页面");
             }
@@ -68,6 +64,8 @@ public class PdfProcessor {
                 ObjectId objectId = gridFsTemplate.store(imageStream, "thumbnail_image/png");
                 return objectId.toString();
             }
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("生成PDF预览图失败", e);
         } finally {
@@ -78,6 +76,50 @@ public class PdfProcessor {
                 try {
                     document.close();
                 } catch (Exception e) {
+                    // ignore
+                }
+            }
+        }
+    }
+
+    /**
+     * 将输入流落到临时文件后生成预览图，避免 {@code readAllBytes} 整文件进堆。
+     */
+    public String generateThumbnail(InputStream pdfInputStream) {
+        Path temp = null;
+        try {
+            temp = Files.createTempFile("lc-pdf-thumb-", ".pdf");
+            Files.copy(pdfInputStream, temp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return generateThumbnailFromPath(temp);
+        } catch (IOException e) {
+            throw new RuntimeException("生成PDF预览图失败", e);
+        } finally {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // ignore
+                }
+            }
+        }
+    }
+
+    /**
+     * 根据 PDF 字节数组生成预览图。大文件后处理请优先使用 {@link #generateThumbnailFromPath(Path)}。
+     */
+    public String generateThumbnail(byte[] pdfBytes) {
+        Path temp = null;
+        try {
+            temp = Files.createTempFile("lc-pdf-thumb-", ".pdf");
+            Files.write(temp, pdfBytes);
+            return generateThumbnailFromPath(temp);
+        } catch (IOException e) {
+            throw new RuntimeException("生成PDF预览图失败", e);
+        } finally {
+            if (temp != null) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
                     // ignore
                 }
             }
@@ -113,9 +155,5 @@ public class PdfProcessor {
                 }
             }
         }
-    }
-
-    private byte[] readInputStreamToBytes(InputStream inputStream) throws IOException {
-        return inputStream.readAllBytes();
     }
 }

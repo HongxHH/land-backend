@@ -5,8 +5,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.gov.landcheck.core.bo.entity.ProjectPartyDeclaredTotals;
-import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
 import com.gov.landcheck.file.service.parse.ParseArtifactCleanupService;
@@ -16,7 +14,8 @@ import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
 import com.gov.landcheck.file.task.base.TaskFailureClassifier;
-import com.gov.landcheck.file.task.processor.receiver.DataFillReceiver;
+import com.gov.landcheck.file.task.context.FileParseModule;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
 
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +31,7 @@ public class FillCommand extends AbstractCommand {
     private static final int FILL_TX_TIMEOUT_SECONDS = 30;
 
     @Resource
-    private DataFillReceiver dataFillReceiver;
+    private FileParseModuleRegistry fileParseModuleRegistry;
 
     @Resource
     private ParseJobUpdateService parseJobUpdateService;
@@ -52,13 +51,11 @@ public class FillCommand extends AbstractCommand {
 
     @Override
     public boolean canSkip(TaskData taskData) {
-        if (!shouldSkipProjectPartyFillWithoutTotals(taskData)) {
+        if (fileParseModuleRegistry == null || taskData == null || taskData.getFileRecord() == null) {
             return false;
         }
-        log.info("项目方汇总无可用汇总数据，跳过回填: fileId={}, remark={}",
-                taskData.getFileRecord().getId(),
-                taskData.getProjectPartySummaryForm().getRemark());
-        return true;
+        FileParseModule module = fileParseModuleRegistry.find(taskData.getFileRecord().getFileContextType());
+        return module != null && module.skipFill(taskData);
     }
 
     @Override
@@ -76,7 +73,7 @@ public class FillCommand extends AbstractCommand {
             tpl.setTimeout(FILL_TX_TIMEOUT_SECONDS);
             tpl.executeWithoutResult(status -> {
                 try {
-                    dataFillReceiver.fillData(taskData);
+                    fillByModule(taskData);
                 } catch (RuntimeException ex) {
                     throw ex;
                 } catch (Exception ex) {
@@ -112,22 +109,18 @@ public class FillCommand extends AbstractCommand {
         return summary;
     }
 
-    /**
-     * 解析器已判定为 PARTIAL 且无汇总数值时，跳过回填（与「无汇总则输出空、不编造」策略一致）。
-     */
-    static boolean shouldSkipProjectPartyFillWithoutTotals(TaskData taskData) {
-        if (taskData == null || taskData.getFileRecord() == null) {
-            return false;
+    private void fillByModule(TaskData taskData) throws Exception {
+        FileContextType type = taskData.getFileRecord().getFileContextType();
+        if (type == null) {
+            return;
         }
-        if (taskData.getFileRecord().getFileContextType() != FileContextType.PROJECT_PARTY_SURVEY_SUMMARY) {
-            return false;
+        FileParseModule module = fileParseModuleRegistry.find(type);
+        if (module == null) {
+            log.warn("数据回填跳过：未注册的文件类型 handler, fileRecordId={}, fileContextType={}",
+                    taskData.getFileRecord().getId(), type);
+            return;
         }
-        ProjectPartySurveySummaryForm form = taskData.getProjectPartySummaryForm();
-        if (form == null || !"PARTIAL".equals(form.getParseStatus())) {
-            return false;
-        }
-        ProjectPartyDeclaredTotals totals = form.getDeclaredTotals();
-        return totals == null || !totals.hasAnyDeclaredField();
+        module.fill(taskData);
     }
 
     private static Exception unwrapFillException(Exception e) {

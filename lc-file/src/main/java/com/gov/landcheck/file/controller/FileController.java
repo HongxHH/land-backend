@@ -28,6 +28,7 @@ import com.gov.landcheck.core.bo.dto.ThreadPoolResizeDTO;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.common.MessageConstant;
 import com.gov.landcheck.core.common.UserTypeConstants;
+import com.gov.landcheck.core.config.logging.AccessLogFilter;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.dto.BulkParseEnqueueResultDTO;
 import com.gov.landcheck.file.dto.FileQueryDTO;
@@ -43,6 +44,7 @@ import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.hutool.core.io.IoUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
@@ -72,7 +74,12 @@ public class FileController {
             @Parameter(description = "文件内容类型") @RequestParam @NotNull String fileContextType,
             @Parameter(description = "上传文件") @RequestParam MultipartFile file,
             @Parameter(description = "期数（实测文件时必填）") @RequestParam(required = false) Integer phase,
-            @Parameter(description = "指定归档夹ID（可选，仅 fileContextType=OTHER 时生效）") @RequestParam(required = false) Long archiveId) {
+            @Parameter(description = "指定归档夹ID（可选，仅 fileContextType=OTHER 时生效）") @RequestParam(required = false) Long archiveId,
+            HttpServletRequest request) {
+        if (request != null && file != null) {
+            request.setAttribute(AccessLogFilter.ATTR_FILE_NAME, file.getOriginalFilename());
+            request.setAttribute(AccessLogFilter.ATTR_FILE_SIZE, file.getSize());
+        }
         FileUploadDTO uploadDTO = new FileUploadDTO();
         uploadDTO.setProjectId(projectId);
         uploadDTO.setFileContextType(FileContextType.getByCode(fileContextType));

@@ -11,5 +11,6 @@ public enum OperationType {
     MOVE,
     PARSE,
     PARSE_COMPLETE,
-    PARSE_CANCEL
+    PARSE_CANCEL,
+    DOWNLOAD
 }

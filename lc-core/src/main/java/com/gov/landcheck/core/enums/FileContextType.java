@@ -1,5 +1,8 @@
 package com.gov.landcheck.core.enums;
 
+import java.util.Arrays;
+import java.util.List;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -130,5 +133,9 @@ public enum FileContextType {
 
     public static boolean isAutoParseContext(FileContextType contextType) {
         return contextType != null && contextType.isAutoParseContext();
+    }
+
+    public static List<FileContextType> autoParseTypes() {
+        return Arrays.stream(values()).filter(type -> type.isAutoParseContext()).toList();
     }
 }

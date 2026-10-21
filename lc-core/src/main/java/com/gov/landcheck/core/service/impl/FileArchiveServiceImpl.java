@@ -39,10 +39,9 @@ public class FileArchiveServiceImpl implements IFileArchiveService {
     private static final List<DefaultArchiveSpec> DEFAULT_ARCHIVES = List.of(
             new DefaultArchiveSpec(FileContextType.CONTRACT, "合同", 0),
             new DefaultArchiveSpec(FileContextType.SURVEY_REPORT, "实测报告", 1),
-            new DefaultArchiveSpec(FileContextType.PLANNING_REVIEW, "规划复核表", 2),
-            new DefaultArchiveSpec(FileContextType.CAPACITY_INDICATOR, "容量指标核查表", 3),
-            new DefaultArchiveSpec(FileContextType.PROJECT_PARTY_SURVEY_SUMMARY, "项目方实测汇总表", 4),
-            new DefaultArchiveSpec(FileContextType.OTHER, "其他未归档文件", 5));
+            new DefaultArchiveSpec(FileContextType.CAPACITY_INDICATOR, "容量指标核查表", 2),
+            new DefaultArchiveSpec(FileContextType.PROJECT_PARTY_SURVEY_SUMMARY, "项目方实测汇总表", 3),
+            new DefaultArchiveSpec(FileContextType.OTHER, "其他未归档文件", 4));
 
     @Resource
     private MongoTemplate mongoTemplate;

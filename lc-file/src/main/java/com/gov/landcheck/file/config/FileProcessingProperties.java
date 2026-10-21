@@ -16,6 +16,7 @@ public class FileProcessingProperties {
     private Pool parsePool = new Pool(2, 2, 512);
     private AutoParse autoParse = new AutoParse();
     private Concurrency concurrency = new Concurrency();
+    private StaleUpload staleUpload = new StaleUpload();
     private int thumbnailDpi = 120;
     private long gateAcquireTimeoutMs = 30_000L;
 
@@ -46,6 +47,7 @@ public class FileProcessingProperties {
             throw new IllegalStateException(
                     "landcheck.file.processing.auto-parse.retry-batch-size must be >= 1");
         }
+        staleUpload.validate();
     }
 
     @Data
@@ -93,5 +95,49 @@ public class FileProcessingProperties {
         private int maxPythonPreprocess = 1;
         /** 运行时动态调参硬上限（parseConcurrency 不可超过此值） */
         private int maxParseConcurrencyLimit = 16;
+    }
+
+    /**
+     * 上传中 / 后处理中僵死状态清理：超时或进程重启后标为 UPLOAD_FAIL，由用户删除后重传。
+     * <p>
+     * post-process-timeout 需覆盖大 PDF 缩略图最坏耗时；定时扫描还会跳过仍在
+     * UploadThreadPool 中的 fileId，避免活任务被误杀。
+     */
+    @Data
+    public static class StaleUpload {
+        private boolean enabled = true;
+        /** UPLOADING 超过该时长视为僵死（毫秒） */
+        private long uploadingTimeoutMs = 600_000L;
+        /**
+         * WAITING_POST_PROCESS 超过该时长视为僵死（毫秒）。
+         * 默认 20 分钟，覆盖大扫描件落盘+PDFBox 首页渲染；仍活跃的任务不会被标失败。
+         */
+        private long postProcessTimeoutMs = 1_200_000L;
+        /** 定时扫描间隔（毫秒） */
+        private long scanIntervalMs = 60_000L;
+        /**
+         * 启动恢复宽限期（毫秒）：只清理 update_time 早于 now-grace 的记录，
+         * 避免 ApplicationRunner 阶段误杀刚写入的上传/后处理记录。
+         */
+        private long startupGraceMs = 60_000L;
+
+        void validate() {
+            if (uploadingTimeoutMs < 60_000L) {
+                throw new IllegalStateException(
+                        "landcheck.file.processing.stale-upload.uploading-timeout-ms must be >= 60000");
+            }
+            if (postProcessTimeoutMs < 60_000L) {
+                throw new IllegalStateException(
+                        "landcheck.file.processing.stale-upload.post-process-timeout-ms must be >= 60000");
+            }
+            if (scanIntervalMs < 10_000L) {
+                throw new IllegalStateException(
+                        "landcheck.file.processing.stale-upload.scan-interval-ms must be >= 10000");
+            }
+            if (startupGraceMs < 0L) {
+                throw new IllegalStateException(
+                        "landcheck.file.processing.stale-upload.startup-grace-ms must be >= 0");
+            }
+        }
     }
 }

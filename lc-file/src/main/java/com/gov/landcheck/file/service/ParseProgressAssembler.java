@@ -15,7 +15,7 @@ import com.gov.landcheck.core.config.global.RetryConfig;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.dto.TaskStatusDTO;
-import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
 import com.gov.landcheck.file.task.plan.ParsePipelinePlan.StageDef;
 
 /**
@@ -26,9 +26,11 @@ import com.gov.landcheck.file.task.plan.ParsePipelinePlan.StageDef;
 public class ParseProgressAssembler {
 
     private final RetryConfig retryConfig;
+    private final FileParseModuleRegistry fileParseModuleRegistry;
 
-    public ParseProgressAssembler(RetryConfig retryConfig) {
+    public ParseProgressAssembler(RetryConfig retryConfig, FileParseModuleRegistry fileParseModuleRegistry) {
         this.retryConfig = retryConfig;
+        this.fileParseModuleRegistry = fileParseModuleRegistry;
     }
 
     public TaskStatusDTO.RunningTaskInfo enrichFromActiveTask(TaskStatusDTO.RunningTaskInfo info, ParseJob job) {
@@ -123,7 +125,7 @@ public class ParseProgressAssembler {
                 }
             }
         }
-        List<StageDef> defs = ParsePipelinePlan.stagesFor(ctx);
+        List<StageDef> defs = fileParseModuleRegistry.stagesFor(ctx);
         List<TaskStatusDTO.PipelineStepInfo> steps = new ArrayList<>(defs.size());
         long nowMs = System.currentTimeMillis();
         for (StageDef def : defs) {

@@ -1,5 +1,7 @@
 package com.gov.landcheck.file.task.thread;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -59,6 +61,10 @@ public class FileUploadPostProcessTask implements Runnable {
         return taskId;
     }
 
+    public String getFileId() {
+        return fileId;
+    }
+
     @Override
     public void run() {
         log.debug("开始文件上传后处理: fileId={}", fileId);
@@ -107,15 +113,24 @@ public class FileUploadPostProcessTask implements Runnable {
         }
 
         if (fileRecord.getFileType() == FileType.PDF) {
-            byte[] fileBytes = gridFSUtils.getFileBytes(fileRecord.getGridfsId());
+            // 落盘临时文件再渲染，避免 getFileBytes 整文件进堆导致批量上传 OOM
+            Path tempPdf = null;
             try {
-                String thumbGridfsId = pdfProcessor.generateThumbnail(fileBytes);
+                tempPdf = Files.createTempFile("lc-upload-thumb-", ".pdf");
+                gridFSUtils.downloadToPath(fileRecord.getGridfsId(), tempPdf);
+                String thumbGridfsId = pdfProcessor.generateThumbnailFromPath(tempPdf);
                 fileRecord.setThumbGridfsId(thumbGridfsId);
             } catch (Exception e) {
                 log.warn("生成缩略图失败: fileName={}, fileId={}, error={}",
                         originalFilename, fileId, e.getMessage());
             } finally {
-                fileBytes = null;
+                if (tempPdf != null) {
+                    try {
+                        Files.deleteIfExists(tempPdf);
+                    } catch (Exception ignored) {
+                        // ignore
+                    }
+                }
             }
         }
 

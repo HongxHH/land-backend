@@ -27,6 +27,7 @@ import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.task.base.TaskData;
+import com.gov.landcheck.file.task.context.FileParseModulesFixture;
 import com.mongodb.client.result.DeleteResult;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +45,8 @@ class ParseArtifactCleanupServiceRevertTest {
     @BeforeEach
     void injectSnapshotService() {
         ReflectionTestUtils.setField(cleanupService, "parseFillSnapshotService", parseFillSnapshotService);
+        ReflectionTestUtils.setField(cleanupService, "fileParseModuleRegistry",
+                FileParseModulesFixture.registryWithSurvey(mongoTemplate));
     }
 
     @Test

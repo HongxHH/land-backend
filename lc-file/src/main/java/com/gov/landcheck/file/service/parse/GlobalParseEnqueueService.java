@@ -101,12 +101,7 @@ public class GlobalParseEnqueueService {
                 .in(FileStateEnum.WAITING_PARSE, FileStateEnum.PARSE_FAIL)
                 .and("auto_parse_suppressed").ne(true)
                 .and("file_context_type")
-                .in(
-                        FileContextType.CONTRACT,
-                        FileContextType.SURVEY_REPORT,
-                        FileContextType.PLANNING_REVIEW,
-                        FileContextType.CAPACITY_INDICATOR,
-                        FileContextType.PROJECT_PARTY_SURVEY_SUMMARY));
+                .in(FileContextType.autoParseTypes()));
         return (int) mongoTemplate.count(query, FileRecord.class);
     }
 }

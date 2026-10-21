@@ -1,4 +1,4 @@
-package com.gov.landcheck.file.task.processor.receiver;
+package com.gov.landcheck.file.task.context;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -6,16 +6,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -28,9 +29,12 @@ import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.service.SurveyReportContractApprovalSyncService;
 import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.file.task.base.TaskData;
+import com.gov.landcheck.file.task.processor.receiver.DataValidReceiver;
+import com.gov.landcheck.file.task.processor.receiver.parse.RoomTableParser;
+import com.gov.landcheck.file.task.processor.receiver.parse.SurveyDataParser;
 
 @ExtendWith(MockitoExtension.class)
-class DataFillReceiverSurveyFillTest {
+class SurveyReportParseModuleFillTest {
 
     @Mock
     private MongoTemplate mongoTemplate;
@@ -41,12 +45,18 @@ class DataFillReceiverSurveyFillTest {
     @Mock
     private SurveyReportContractApprovalSyncService surveyReportContractApprovalSyncService;
 
-    @InjectMocks
-    private DataFillReceiver dataFillReceiver;
+    private SurveyReportParseModule surveyReportParseModule;
 
     @BeforeEach
-    void initHandlers() {
-        dataFillReceiver.initHandlers();
+    void setUp() {
+        surveyReportParseModule = new SurveyReportParseModule(
+                mock(SurveyDataParser.class),
+                mock(RoomTableParser.class),
+                mongoTemplate,
+                new FillChangePublisher(null),
+                surveyReportContractApprovalSyncService,
+                unknownUsageRecordService,
+                mock(DataValidReceiver.class));
     }
 
     @Test
@@ -66,7 +76,7 @@ class DataFillReceiverSurveyFillTest {
         when(mongoTemplate.findOne(any(Query.class), eq(SurveyReportInfo.class))).thenReturn(existing);
         when(mongoTemplate.find(any(Query.class), eq(RoomInfo.class))).thenReturn(List.of());
 
-        dataFillReceiver.fillData(taskData);
+        surveyReportParseModule.fill(taskData);
 
         ArgumentCaptor<SurveyReportInfo> captor = ArgumentCaptor.forClass(SurveyReportInfo.class);
         verify(mongoTemplate).save(captor.capture());
@@ -93,7 +103,7 @@ class DataFillReceiverSurveyFillTest {
         when(mongoTemplate.find(any(Query.class), eq(RoomInfo.class))).thenReturn(List.of());
         when(unknownUsageRecordService.deleteByFileRecordId(9L)).thenThrow(new RuntimeException("mongo down"));
 
-        assertThrows(RuntimeException.class, () -> dataFillReceiver.fillData(taskData));
+        assertThrows(RuntimeException.class, () -> surveyReportParseModule.fill(taskData));
     }
 
     private static FileRecord surveyFile(Long fileId, Long projectId) {

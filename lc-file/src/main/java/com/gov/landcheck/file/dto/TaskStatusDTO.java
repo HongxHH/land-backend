@@ -246,7 +246,8 @@ public class TaskStatusDTO {
         private String retryReason;
 
         /**
-         * 按文件类型裁剪后的解析流水线步骤（与 {@link com.gov.landcheck.file.task.plan.ParsePipelinePlan}
+         * 按文件类型裁剪后的解析流水线步骤（与
+         * {@link com.gov.landcheck.file.task.context.FileParseModuleRegistry}
          * 一致）
          */
         private List<PipelineStepInfo> pipelineSteps;

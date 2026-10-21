@@ -31,3 +31,4 @@ landcheck:
       - /doc.html
       - /webjars/**
       - /favicon.ico
+      - /file/project/*/source-bundle

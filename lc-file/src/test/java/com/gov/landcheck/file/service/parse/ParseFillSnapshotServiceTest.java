@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -30,6 +31,7 @@ import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.file.task.base.TaskData;
+import com.gov.landcheck.file.task.context.FileParseModulesFixture;
 import com.mongodb.client.result.DeleteResult;
 
 @ExtendWith(MockitoExtension.class)
@@ -47,6 +49,8 @@ class ParseFillSnapshotServiceTest {
     @BeforeEach
     void stubTransaction() {
         lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        ReflectionTestUtils.setField(snapshotService, "fileParseModuleRegistry",
+                FileParseModulesFixture.registryWithSurvey(mongoTemplate));
     }
 
     @Test

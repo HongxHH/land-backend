@@ -18,7 +18,7 @@ import com.gov.landcheck.file.task.base.Pipeline;
 import com.gov.landcheck.file.task.base.PipelineBuilder;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
-import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
 import com.gov.landcheck.file.task.plan.ParsePipelinePlan.StageDef;
 import com.gov.landcheck.file.task.processor.command.FillCommand;
 import com.gov.landcheck.file.task.processor.command.OCRCommand;
@@ -39,16 +39,19 @@ public class ParseFileExecutor {
     private ParseArtifactCleanupService parseArtifactCleanupService;
 
     private final ProcessingConcurrencyGate parsePipelineGate;
+    private final FileParseModuleRegistry fileParseModuleRegistry;
     private final Map<String, Command> commandsByStage;
 
     public ParseFileExecutor(
             @Qualifier(FileProcessingConfig.PARSE_PIPELINE_GATE) ProcessingConcurrencyGate parsePipelineGate,
+            FileParseModuleRegistry fileParseModuleRegistry,
             PreprocessCommand preprocessCommand,
             OCRCommand ocrCommand,
             ParseCommand parseCommand,
             FillCommand fillCommand,
             ValidateCommand validateCommand) {
         this.parsePipelineGate = parsePipelineGate;
+        this.fileParseModuleRegistry = fileParseModuleRegistry;
         this.commandsByStage = Map.of(
                 preprocessCommand.getStage(), preprocessCommand,
                 ocrCommand.getStage(), ocrCommand,
@@ -107,7 +110,7 @@ public class ParseFileExecutor {
         FileContextType contextType = taskData != null && taskData.getFileRecord() != null
                 ? taskData.getFileRecord().getFileContextType()
                 : null;
-        List<Command> commands = commandsFor(contextType, commandsByStage);
+        List<Command> commands = commandsFor(contextType, commandsByStage, fileParseModuleRegistry);
         PipelineBuilder builder = Pipeline.of("FileProcessingPipeline");
         for (Command command : commands) {
             builder.add(command);
@@ -116,14 +119,15 @@ public class ParseFileExecutor {
     }
 
     /**
-     * 按 {@link ParsePipelinePlan#stagesFor(FileContextType)} 的顺序取命令。
-     * 空文件类型在这里失败，不走计划表对 null 的默认链路。
+     * 按 {@link FileParseModuleRegistry#stagesFor(FileContextType)} 的顺序取命令。
+     * 空文件类型在这里失败，不走注册表对未注册类型的默认链路。
      */
-    static List<Command> commandsFor(FileContextType contextType, Map<String, Command> commandsByStage) {
+    static List<Command> commandsFor(FileContextType contextType, Map<String, Command> commandsByStage,
+            FileParseModuleRegistry registry) {
         if (contextType == null) {
             throw new IllegalStateException("解析管道缺少文件内容类型，无法确定执行阶段");
         }
-        List<StageDef> stages = ParsePipelinePlan.stagesFor(contextType);
+        List<StageDef> stages = registry.stagesFor(contextType);
         List<Command> commands = new ArrayList<>(stages.size());
         for (StageDef stage : stages) {
             Command command = commandsByStage.get(stage.code());

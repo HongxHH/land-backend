@@ -7,8 +7,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -23,7 +21,8 @@ import com.gov.landcheck.file.service.parse.ParseRollbackSummary;
 import com.gov.landcheck.file.task.base.AbstractCommand;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
-import com.gov.landcheck.file.task.processor.receiver.DataParseReceiver;
+import com.gov.landcheck.file.task.context.FileParseModule;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
 import com.gov.landcheck.file.utils.GridFSUtils;
 
 import jakarta.annotation.Resource;
@@ -40,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ParseCommand extends AbstractCommand {
 
     @Resource
-    private DataParseReceiver dataParseReceiver;
+    private FileParseModuleRegistry fileParseModuleRegistry;
 
     @Resource
     private MongoTemplate mongoTemplate;
@@ -81,11 +80,12 @@ public class ParseCommand extends AbstractCommand {
             }
             header.markParseStarted();
 
-            // 执行数据解析
-            ParseResult parseResult = dataParseReceiver.parse(
+            FileParseModule module = fileParseModuleRegistry.require(taskData.getFileRecord().getFileContextType());
+            ParseResult parseResult = module.parse(
                     resolveOcrPages(taskData),
                     taskData.getFileRecord(),
                     header);
+            module.assertCriticalOutput(parseResult);
 
             // 保存解析数据头
             header.markParseCompleted();

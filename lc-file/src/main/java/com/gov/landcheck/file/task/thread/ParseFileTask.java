@@ -1,36 +1,28 @@
 package com.gov.landcheck.file.task.thread;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.StringUtils;
 
 import com.gov.landcheck.core.audit.AuditFileRecorder;
 import com.gov.landcheck.core.audit.OperationAuditService;
 import com.gov.landcheck.core.audit.OperationType;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.ParseJob;
-import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
-import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
-import com.gov.landcheck.core.config.cache.event.ProjectDataChangedEvent;
 import com.gov.landcheck.core.config.global.ApplicationContextProvider;
 import com.gov.landcheck.core.config.mq.constant.TopicConstants;
 import com.gov.landcheck.core.config.mq.dto.FileParseResultMessage;
-import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.FileStateEnum;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.file.service.ParseJobUpdateService;
 import com.gov.landcheck.file.service.RetryDecisionService;
 import com.gov.landcheck.file.service.parse.ParseFillSnapshotService;
 import com.gov.landcheck.file.task.base.Task;
+import com.gov.landcheck.file.task.context.FileParseModule;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
 import com.gov.landcheck.file.task.base.TaskData;
 import com.gov.landcheck.file.task.base.TaskException;
 import com.gov.landcheck.file.task.executor.ParseFileExecutor;
@@ -44,8 +36,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ParseFileTask implements Task {
-
-    private static final int PARTY_SUMMARY_FAIL_REMARK_MAX = 900;
 
     private final TaskData taskData;
     private final ParseFileExecutor parseFileExecutor;
@@ -342,7 +332,7 @@ public class ParseFileTask implements Task {
                 parseJobUpdateService.updateJobFailed(taskData.getParseJob(), errorMessage);
                 mongoTemplate.save(taskData.getFileRecord());
                 try {
-                    markProjectPartySummaryFormParseFailed(mongoTemplate, errorMessage);
+                    notifyParseFailed(errorMessage);
                 } catch (Exception ex) {
                     log.warn("同步项目方汇总主表解析失败状态失败: fileId={}, error={}",
                             taskData.getFileRecord().getId(), ex.getMessage());
@@ -407,42 +397,7 @@ public class ParseFileTask implements Task {
         taskData.markCompleted();
         taskData.getFileRecord().setFileState(FileStateEnum.PARSE_COMPLETE);
         taskData.getFileRecord().setParseJobId(taskData.getParseJob().getId());
-
-        SurveyReportInfo surveyReportInfo = taskData.getSurveyReportInfo();
-        if (surveyReportInfo != null) {
-            surveyReportInfo.setIsParsed(1);
-            mongoTemplate.save(surveyReportInfo);
-        }
-        ProjectPartySurveySummaryForm parsedForm = taskData.getProjectPartySummaryForm();
-        if (parsedForm != null) {
-            Long fileRecordId = taskData.getFileRecord().getId();
-            Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-            ProjectPartySurveySummaryForm existing = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
-            ProjectPartySurveySummaryForm target = existing != null ? existing : parsedForm;
-            if (existing == null) {
-                if (target.getProjectId() == null) {
-                    target.setProjectId(taskData.getFileRecord().getProjectId());
-                }
-                if (target.getFileRecordId() == null) {
-                    target.setFileRecordId(fileRecordId);
-                }
-            }
-            target.setDeclaredTotals(parsedForm.getDeclaredTotals());
-            target.setIsParsed(1);
-            if (StringUtils.hasText(parsedForm.getParseStatus())) {
-                target.setParseStatus(parsedForm.getParseStatus());
-            } else if (!StringUtils.hasText(target.getParseStatus())) {
-                target.setParseStatus("SUCCESS");
-            }
-            target.setRemark(parsedForm.getRemark());
-            if (existing == null) {
-                target.preSave();
-            } else {
-                target.setUpdateTime(LocalDateTime.now());
-            }
-            mongoTemplate.save(target);
-            publishProjectPartySummaryChanged(taskData.getFileRecord().getProjectId(), target.getId());
-        }
+        notifyParseSucceeded();
 
         if (!parseJobUpdateService.updateJobSuccess(taskData.getParseJob(), taskData.getExecutionTime())) {
             throw new TaskException(TaskException.ErrorCode.TASK_CANCELLED, "任务已取消，跳过成功落库");
@@ -450,67 +405,27 @@ public class ParseFileTask implements Task {
         mongoTemplate.save(taskData.getFileRecord());
     }
 
-    /**
-     * 与 {@link FileStateEnum#PARSE_FAIL} 对齐：项目方汇总主表若仍为 PENDING，界面会误显示为「未解析」。
-     */
-    private void markProjectPartySummaryFormParseFailed(MongoTemplate mongoTemplate, String errorMessage) {
-        if (taskData.getFileRecord() == null || taskData.getFileRecord().getId() == null) {
+    private void notifyParseSucceeded() {
+        FileRecord fileRecord = taskData.getFileRecord();
+        if (fileRecord == null || fileRecord.getFileContextType() == null) {
             return;
         }
-        if (!FileContextType.PROJECT_PARTY_SURVEY_SUMMARY.equals(taskData.getFileRecord().getFileContextType())) {
-            return;
-        }
-        Long fileRecordId = taskData.getFileRecord().getId();
-        Long projectId = taskData.getFileRecord().getProjectId();
-        if (projectId == null) {
-            return;
-        }
-        String msg = StringUtils.hasText(errorMessage) ? errorMessage.trim() : "未知错误";
-        if (msg.length() > PARTY_SUMMARY_FAIL_REMARK_MAX) {
-            msg = msg.substring(0, PARTY_SUMMARY_FAIL_REMARK_MAX) + "…";
-        }
-        String remark = "解析失败: " + msg;
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        ProjectPartySurveySummaryForm existing = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
-        Long formId;
-        LocalDateTime now = LocalDateTime.now();
-        if (existing == null) {
-            ProjectPartySurveySummaryForm inserted = new ProjectPartySurveySummaryForm();
-            inserted.setProjectId(projectId);
-            inserted.setFileRecordId(fileRecordId);
-            inserted.setIsParsed(0);
-            inserted.setParseStatus("FAILED");
-            inserted.setDeclaredTotals(null);
-            inserted.setRemark(remark);
-            inserted.preSave();
-            mongoTemplate.save(inserted);
-            formId = inserted.getId();
-        } else {
-            Update update = new Update()
-                    .set("is_parsed", 0)
-                    .set("parse_status", "FAILED")
-                    .set("remark", remark)
-                    .set("update_time", now);
-            mongoTemplate.updateFirst(query, update, ProjectPartySurveySummaryForm.class);
-            formId = existing.getId();
-        }
-        try {
-            ApplicationEventPublisher publisher = ApplicationContextProvider.getBean(ApplicationEventPublisher.class);
-            publisher.publishEvent(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, formId));
-        } catch (Exception ex) {
-            log.warn("发布项目方汇总变更事件失败: projectId={}, formId={}, error={}", projectId, formId, ex.getMessage());
+        FileParseModule module = ApplicationContextProvider.getBean(FileParseModuleRegistry.class)
+                .find(fileRecord.getFileContextType());
+        if (module != null) {
+            module.onParseSucceeded(taskData);
         }
     }
 
-    private void publishProjectPartySummaryChanged(Long projectId, Long formId) {
-        if (projectId == null || formId == null) {
+    private void notifyParseFailed(String errorMessage) {
+        FileRecord fileRecord = taskData.getFileRecord();
+        if (fileRecord == null || fileRecord.getFileContextType() == null) {
             return;
         }
-        try {
-            ApplicationEventPublisher publisher = ApplicationContextProvider.getBean(ApplicationEventPublisher.class);
-            publisher.publishEvent(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, formId));
-        } catch (Exception ex) {
-            log.warn("发布项目方汇总变更事件失败: projectId={}, formId={}, error={}", projectId, formId, ex.getMessage());
+        FileParseModule module = ApplicationContextProvider.getBean(FileParseModuleRegistry.class)
+                .find(fileRecord.getFileContextType());
+        if (module != null) {
+            module.onParseFailed(fileRecord, errorMessage);
         }
     }
 

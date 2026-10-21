@@ -27,7 +27,8 @@ public class LandcheckSecurityProperties {
             "/swagger-ui.html",
             "/doc.html",
             "/webjars/**",
-            "/favicon.ico"));
+            "/favicon.ico",
+            "/file/project/*/source-bundle"));
 
     private RateLimit rateLimit = new RateLimit();
 

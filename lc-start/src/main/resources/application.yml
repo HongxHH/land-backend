@@ -82,6 +82,7 @@ landcheck:
       - /doc.html
       - /webjars/**
       - /favicon.ico
+      - /file/project/*/source-bundle
     rate-limit:
       enabled: true
       per-ip-per-second: 100
@@ -129,6 +130,15 @@ landcheck:
         enabled: true
         retry-interval-ms: 30000
         retry-batch-size: 16
+      stale-upload:
+        enabled: true
+        # 仍在读取请求体的上传不会被标失败；超过该时长且没有新字节才视为僵死
+        uploading-timeout-ms: 600000
+        # 大 PDF 缩略图可能较慢；定时扫描还会跳过仍在 UploadThreadPool 中的文件
+        post-process-timeout-ms: 1200000
+        scan-interval-ms: 60000
+        # 启动时只清宽限期之前的僵死态，避免误杀启动瞬间新写入的记录
+        startup-grace-ms: 60000
       concurrency:
         max-parse-concurrency-limit: 16
         max-python-preprocess: 1

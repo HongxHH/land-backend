@@ -43,7 +43,7 @@ public class FileArchiveController {
     private IFileArchiveService fileArchiveService;
 
     @GetMapping("/{projectId}/archives")
-    @Operation(summary = "获取项目下所有归档夹", description = "含默认目录（合同、实测报告、规划复核表、项目方实测汇总表、其他未归档文件）及用户自定义归档夹，按排序返回")
+    @Operation(summary = "获取项目下所有归档夹", description = "含默认目录（合同、实测报告、容量指标核查表、项目方实测汇总表、其他未归档文件）及用户自定义归档夹，按排序返回")
     public AjaxJson listArchives(@Parameter(description = "项目ID") @PathVariable Long projectId) {
         try {
             List<FileArchive> list = fileArchiveService.listByProjectId(projectId);

@@ -8,13 +8,11 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.BeanUtils;
@@ -26,6 +24,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.gridfs.GridFsTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -41,19 +40,13 @@ import com.gov.landcheck.core.audit.OperationType;
 import com.gov.landcheck.core.audit.OperatorContext;
 import com.gov.landcheck.core.audit.TargetType;
 import com.gov.landcheck.core.bo.R.AjaxJson;
-import com.gov.landcheck.core.bo.entity.CapacityIndicatorInfo;
-import com.gov.landcheck.core.bo.entity.ContractInfo;
 import com.gov.landcheck.core.bo.entity.FileArchive;
 import com.gov.landcheck.core.bo.entity.FileRecord;
 import com.gov.landcheck.core.bo.entity.OCRExecutionResult;
 import com.gov.landcheck.core.bo.entity.ParseJob;
 import com.gov.landcheck.core.bo.entity.ParsedDataHeader;
 import com.gov.landcheck.core.bo.entity.ParsedDataItem;
-import com.gov.landcheck.core.bo.entity.PlanningReviewForm;
-import com.gov.landcheck.core.bo.entity.PlanningReviewRow;
 import com.gov.landcheck.core.bo.entity.Project;
-import com.gov.landcheck.core.bo.entity.ProjectPartySurveySummaryForm;
-import com.gov.landcheck.core.bo.entity.RoomInfo;
 import com.gov.landcheck.core.bo.entity.SurveyReportInfo;
 import com.gov.landcheck.core.bo.entity.UnknownUsageRecord;
 import com.gov.landcheck.core.common.MessageConstant;
@@ -72,12 +65,17 @@ import com.gov.landcheck.file.dto.FileQueryDTO;
 import com.gov.landcheck.file.dto.FileQueryResultDTO;
 import com.gov.landcheck.file.dto.FileUploadDTO;
 import com.gov.landcheck.file.dto.SubmitParseResult;
+import com.gov.landcheck.file.service.ActiveUploadTracker;
 import com.gov.landcheck.file.service.FileService;
+import com.gov.landcheck.file.service.ReceivingInputStream;
 import com.gov.landcheck.file.service.ITaskExecuteService;
 import com.gov.landcheck.file.service.UploadRecordService;
 import com.gov.landcheck.file.service.parse.AutoParseSubmissionService;
 import com.gov.landcheck.file.service.parse.FileParseSubmissionService;
 import com.gov.landcheck.file.service.parse.ParseCancelSupport;
+import com.gov.landcheck.file.task.context.FileParseModule;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
+import com.gov.landcheck.file.task.context.PlaceholderCreated;
 import com.gov.landcheck.file.utils.GridFSUtils;
 import com.gov.landcheck.file.vo.FileRecordVO;
 
@@ -118,6 +116,10 @@ public class FileServiceImpl implements FileService {
     private AutoParseSubmissionService autoParseSubmissionService;
     @Resource
     private SurveyReportContractApprovalSyncService surveyReportContractApprovalSyncService;
+    @Resource
+    private FileParseModuleRegistry fileParseModuleRegistry;
+    @Resource
+    private ActiveUploadTracker activeUploadTracker;
 
     private static final long DELETE_PARSE_CANCEL_WAIT_MS = 15_000L;
 
@@ -500,129 +502,9 @@ public class FileServiceImpl implements FileService {
         // 删除OCR相关文件（所有文件类型都需要；多次重新解析可能有多条记录）
         deleteOcrExecutionResultsForFile(fileRecordId);
 
-        if (FileContextType.CONTRACT.equals(contextType)) { // 删除合同信息
-            deleteContractInfo(fileRecordId);
-        } else if (FileContextType.SURVEY_REPORT.equals(contextType)) { // 删除实测报告信息和房间信息
-            deleteSurveyReportData(fileRecordId);
-        } else if (FileContextType.PLANNING_REVIEW.equals(contextType)) { // 删除规划复核表信息
-            deletePlanningReviewData(fileRecordId);
-        } else if (FileContextType.CAPACITY_INDICATOR.equals(contextType)) { // 删除容量指标核查表信息
-            deleteCapacityIndicatorData(fileRecordId);
-        } else if (FileContextType.PROJECT_PARTY_SURVEY_SUMMARY.equals(contextType)) { // 删除项目方实测汇总信息
-            deleteProjectPartySummaryData(fileRecordId);
-        }
-    }
-
-    private void deleteProjectPartySummaryData(Long fileRecordId) {
-        Query byFile = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        mongoTemplate.remove(byFile, ProjectPartySurveySummaryForm.LEGACY_ROW_COLLECTION);
-        Query formQuery = byFile;
-        List<ProjectPartySurveySummaryForm> forms = mongoTemplate.find(formQuery, ProjectPartySurveySummaryForm.class);
-        mongoTemplate.remove(formQuery, ProjectPartySurveySummaryForm.class);
-        if (forms != null) {
-            for (ProjectPartySurveySummaryForm form : forms) {
-                if (form.getProjectId() != null) {
-                    publish(ProjectDataChangedEvent.projectPartySummaryChanged(form.getProjectId(), form.getId()));
-                }
-            }
-        }
-        log.info("删除项目方实测汇总数据: fileRecordId={}", fileRecordId);
-    }
-
-    private void deletePlanningReviewData(Long fileRecordId) {
-        Query rowQuery = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        mongoTemplate.remove(rowQuery, PlanningReviewRow.class);
-        Query formQuery = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        List<PlanningReviewForm> forms = mongoTemplate.find(formQuery, PlanningReviewForm.class);
-        mongoTemplate.remove(formQuery, PlanningReviewForm.class);
-        if (forms != null) {
-            for (PlanningReviewForm f : forms) {
-                if (f.getProjectId() != null) {
-                    publish(ProjectDataChangedEvent.planningReviewChanged(f.getProjectId()));
-                }
-            }
-        }
-        log.info("删除规划复核表数据: fileRecordId={}", fileRecordId);
-    }
-
-    private void deleteCapacityIndicatorData(Long fileRecordId) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        List<CapacityIndicatorInfo> records = mongoTemplate.find(query, CapacityIndicatorInfo.class);
-        mongoTemplate.remove(query, CapacityIndicatorInfo.class);
-        if (records != null) {
-            for (CapacityIndicatorInfo info : records) {
-                if (info.getProjectId() != null) {
-                    publish(ProjectDataChangedEvent.capacityIndicatorChanged(info.getProjectId()));
-                }
-            }
-        }
-        log.info("删除容量指标核查表数据: fileRecordId={}", fileRecordId);
-    }
-
-    /**
-     * 删除合同信息
-     */
-    private void deleteContractInfo(Long fileRecordId) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        List<ContractInfo> contracts = mongoTemplate.find(query, ContractInfo.class);
-        Set<Long> affectedProjectIds = new HashSet<>();
-        if (contracts != null) {
-            for (ContractInfo c : contracts) {
-                if (c != null && c.getProjectId() != null) {
-                    affectedProjectIds.add(c.getProjectId());
-                }
-            }
-        }
-        if (contracts != null && !contracts.isEmpty()) {
-            List<Long> contractIds = contracts.stream()
-                    .map(ContractInfo::getId)
-                    .filter(id -> id != null)
-                    .toList();
-            if (!contractIds.isEmpty()) {
-                Query parcelQuery = new Query(Criteria.where("contract_id").in(contractIds));
-                mongoTemplate.remove(parcelQuery, com.gov.landcheck.core.bo.entity.LandParcel.class).getDeletedCount();
-
-            }
-        }
-        if (contracts != null && !contracts.isEmpty()) {
-            for (ContractInfo contract : contracts) {
-                publish(ProjectDataChangedEvent.contractChanged(contract.getProjectId(), contract.getId()));
-            }
-        }
-        long contractDeletedCount = mongoTemplate.remove(query, ContractInfo.class).getDeletedCount();
-        log.info("删除合同信息: fileRecordId={}, deletedCount={}", fileRecordId, contractDeletedCount);
-        for (Long pid : affectedProjectIds) {
-            try {
-                surveyReportContractApprovalSyncService.syncAllSurveyReportsInProject(pid);
-            } catch (Exception ex) {
-                log.warn("同步实测报告合同/批文编号失败 projectId={}", pid, ex);
-            }
-        }
-    }
-
-    /**
-     * 删除实测报告数据（包括SurveyReportInfo和RoomInfo）
-     */
-    private void deleteSurveyReportData(Long fileRecordId) {
-        // 删除实测报告信息
-        Query surveyQuery = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        List<SurveyReportInfo> surveyReports = mongoTemplate.find(surveyQuery, SurveyReportInfo.class);
-
-        long surveyDeletedCount = mongoTemplate.remove(surveyQuery, SurveyReportInfo.class).getDeletedCount();
-        log.info("删除实测报告信息: fileRecordId={}, deletedCount={}", fileRecordId, surveyDeletedCount);
-
-        // 删除对应的房间信息
-        if (!surveyReports.isEmpty()) {
-            List<Long> surveyReportIds = surveyReports.stream()
-                    .map(SurveyReportInfo::getId)
-                    .toList();
-
-            Query roomQuery = new Query(Criteria.where("survey_report_info_id").in(surveyReportIds));
-            long roomDeletedCount = mongoTemplate.remove(roomQuery, RoomInfo.class).getDeletedCount();
-            for (SurveyReportInfo report : surveyReports) {
-                publish(ProjectDataChangedEvent.surveyReportChanged(report.getProjectId(), report.getId(), true));
-            }
-            log.info("删除房间信息: surveyReportIds={}, deletedCount={}", surveyReportIds, roomDeletedCount);
+        FileParseModule module = fileParseModuleRegistry.find(contextType);
+        if (module != null) {
+            module.deleteBusinessData(fileRecord);
         }
     }
 
@@ -972,51 +854,55 @@ public class FileServiceImpl implements FileService {
         fileRecord.preSave();
         mongoTemplate.save(fileRecord);
 
-        try (InputStream inputStream = file.getInputStream()) {
+        Long fileId = fileRecord.getId();
+        activeUploadTracker.begin(fileId);
+        String storedGridFsId = null;
+        try (InputStream inputStream = new ReceivingInputStream(file.getInputStream(), fileId, activeUploadTracker)) {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             try (DigestInputStream digestStream = new DigestInputStream(inputStream, digest)) {
                 org.bson.types.ObjectId gridFsId = gridFsTemplate.store(digestStream, originFileName,
                         file.getContentType());
+                storedGridFsId = gridFsId.toString();
                 String md5Hex = HexFormat.of().formatHex(digest.digest());
-                fileRecord.setGridfsId(gridFsId.toString());
+                if (!markWaitingPostProcess(fileId, storedGridFsId, md5Hex)) {
+                    deleteStoredGridFs(fileId, storedGridFsId);
+                    throw new UploadCommitException("上传已中断，请删除后重新上传");
+                }
+                fileRecord.setGridfsId(storedGridFsId);
                 fileRecord.setMd5(md5Hex);
                 fileRecord.setFileState(FileStateEnum.WAITING_POST_PROCESS);
-                mongoTemplate.save(fileRecord);
                 try {
                     String changeSummary = AuditDiffHelper.summary(fileRecord, TargetType.FILE);
                     operationAuditService.recordUploadOrMove("UPLOAD", TargetType.FILE.getValue(),
-                            String.valueOf(fileRecord.getId()), projectId, null,
+                            String.valueOf(fileId), projectId, null,
                             changeSummary, null);
                 } catch (Exception auditEx) {
-                    log.warn("上传审计记录失败: fileId={}", fileRecord.getId(), auditEx);
+                    log.warn("上传审计记录失败: fileId={}", fileId, auditEx);
                 }
             }
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("MD5算法不可用", e);
+        } catch (UploadCommitException e) {
+            throw e;
         } catch (Exception e) {
-            fileRecord.setFileState(FileStateEnum.UPLOAD_FAIL);
-            fileRecord.setParseMessage("上传失败: " + e.getMessage());
-            mongoTemplate.save(fileRecord);
-            log.error("写入GridFS失败: fileName={}, fileId={}, error={}", originFileName, fileRecord.getId(),
+            markFailedIfState(fileId, FileStateEnum.UPLOADING, "上传失败: " + e.getMessage(), false);
+            deleteStoredGridFs(fileId, storedGridFsId);
+            log.error("写入GridFS失败: fileName={}, fileId={}, error={}", originFileName, fileId,
                     e.getMessage(), e);
             throw new UploadCommitException("上传失败: " + e.getMessage());
+        } finally {
+            activeUploadTracker.end(fileId);
         }
 
         try {
             createPlaceholderBusinessObject(fileRecord, fileContextType, phase);
         } catch (Exception e) {
-            try {
-                if (fileRecord.getGridfsId() != null) {
-                    gridFSUtils.deleteById(fileRecord.getGridfsId());
-                }
-            } catch (Exception ex) {
-                log.warn("占位创建失败后的GridFS清理失败: fileId={}, gridfsId={}, error={}",
-                        fileRecord.getId(), fileRecord.getGridfsId(), ex.getMessage());
-            }
+            deleteStoredGridFs(fileRecord.getId(), fileRecord.getGridfsId());
+            markFailedIfState(fileRecord.getId(), FileStateEnum.WAITING_POST_PROCESS,
+                    "创建业务占位失败: " + e.getMessage(), true);
             fileRecord.setGridfsId(null);
             fileRecord.setFileState(FileStateEnum.UPLOAD_FAIL);
             fileRecord.setParseMessage("创建业务占位失败: " + e.getMessage());
-            mongoTemplate.save(fileRecord);
             log.error("创建业务占位失败: fileName={}, fileId={}, error={}", originFileName, fileRecord.getId(),
                     e.getMessage(), e);
             throw new UploadCommitException("创建业务占位失败: " + e.getMessage());
@@ -1025,6 +911,45 @@ public class FileServiceImpl implements FileService {
         log.debug("文件已写入GridFS并进入等待后处理: fileName={}, fileId={}, state={}",
                 originFileName, fileRecord.getId(), fileRecord.getFileState());
         return fileRecord;
+    }
+
+    /** 仅当记录仍是 UPLOADING 时进入后处理，避免把已删除或已失败的文档写回去。 */
+    private boolean markWaitingPostProcess(Long fileId, String gridFsId, String md5) {
+        Query query = new Query(Criteria.where("_id").is(fileId)
+                .and("file_state").is(FileStateEnum.UPLOADING));
+        Update update = new Update()
+                .set("gridfs_id", gridFsId)
+                .set("md5", md5)
+                .set("file_state", FileStateEnum.WAITING_POST_PROCESS)
+                .set("update_time", LocalDateTime.now());
+        return mongoTemplate.updateFirst(query, update, FileRecord.class).getModifiedCount() > 0;
+    }
+
+    private void markFailedIfState(Long fileId, FileStateEnum fromState, String message, boolean clearGridFsId) {
+        if (fileId == null || fromState == null) {
+            return;
+        }
+        Update update = new Update()
+                .set("file_state", FileStateEnum.UPLOAD_FAIL)
+                .set("parse_message", message)
+                .set("update_time", LocalDateTime.now());
+        if (clearGridFsId) {
+            update.set("gridfs_id", null);
+        }
+        Query query = new Query(Criteria.where("_id").is(fileId).and("file_state").is(fromState));
+        mongoTemplate.updateFirst(query, update, FileRecord.class);
+    }
+
+    private void deleteStoredGridFs(Long fileId, String gridFsId) {
+        if (gridFsId == null) {
+            return;
+        }
+        try {
+            gridFSUtils.deleteById(gridFsId);
+        } catch (Exception ex) {
+            log.warn("上传中断后的GridFS清理失败: fileId={}, gridfsId={}, error={}",
+                    fileId, gridFsId, ex.getMessage());
+        }
     }
 
     private void rollbackCommittedFile(String fileId, Long projectId, Exception cause) {
@@ -1060,89 +985,23 @@ public class FileServiceImpl implements FileService {
         if (fileRecord == null || fileRecord.getId() == null || fileContextType == null) {
             return;
         }
-        if (FileContextType.CONTRACT.equals(fileContextType)) {
-            Query query = new Query(Criteria.where("file_record_id").is(fileRecord.getId()));
-            ContractInfo existing = mongoTemplate.findOne(query, ContractInfo.class);
-            if (existing != null) {
-                return;
-            }
-            ContractInfo contractInfo = new ContractInfo();
-            contractInfo.setProjectId(fileRecord.getProjectId());
-            contractInfo.setFileRecordId(fileRecord.getId());
-            contractInfo.preSave();
-            mongoTemplate.save(contractInfo);
-            auditPlaceholderCreate(TargetType.CONTRACT, contractInfo, fileRecord);
-            try {
-                surveyReportContractApprovalSyncService.syncAllSurveyReportsInProject(contractInfo.getProjectId());
-            } catch (Exception ex) {
-                log.warn("同步实测报告合同/批文编号失败 projectId={}", contractInfo.getProjectId(), ex);
-            }
-            publish(ProjectDataChangedEvent.contractChanged(contractInfo.getProjectId(), contractInfo.getId()));
-        } else if (FileContextType.SURVEY_REPORT.equals(fileContextType)) {
-            Query query = new Query(Criteria.where("file_record_id").is(fileRecord.getId()));
-            SurveyReportInfo existing = mongoTemplate.findOne(query, SurveyReportInfo.class);
-            if (existing != null) {
-                return;
-            }
-            SurveyReportInfo surveyReportInfo = new SurveyReportInfo();
-            surveyReportInfo.setProjectId(fileRecord.getProjectId());
-            surveyReportInfo.setFileRecordId(fileRecord.getId());
-            surveyReportInfo.setPhase(phase);
-            surveyReportInfo.setIsParsed(0);
-            surveyReportInfo.preSave();
-            mongoTemplate.save(surveyReportInfo);
-            auditPlaceholderCreate(TargetType.SURVEY_REPORT, surveyReportInfo, fileRecord);
-            try {
-                surveyReportContractApprovalSyncService.syncAllSurveyReportsInProject(surveyReportInfo.getProjectId());
-            } catch (Exception ex) {
-                log.warn("同步实测报告合同/批文编号失败 projectId={}", surveyReportInfo.getProjectId(), ex);
-            }
-            publish(ProjectDataChangedEvent.surveyReportChanged(surveyReportInfo.getProjectId(),
-                    surveyReportInfo.getId(), false));
-        } else if (FileContextType.PLANNING_REVIEW.equals(fileContextType)) {
-            Query query = new Query(Criteria.where("file_record_id").is(fileRecord.getId()));
-            PlanningReviewForm existing = mongoTemplate.findOne(query, PlanningReviewForm.class);
-            if (existing != null) {
-                return;
-            }
-            PlanningReviewForm form = new PlanningReviewForm();
-            form.setProjectId(fileRecord.getProjectId());
-            form.setFileRecordId(fileRecord.getId());
-            form.setIsParsed(0);
-            form.preSave();
-            mongoTemplate.save(form);
-            auditPlaceholderCreate(TargetType.PLANNING_REVIEW_FORM, form, fileRecord);
-            publish(ProjectDataChangedEvent.planningReviewChanged(form.getProjectId()));
-        } else if (FileContextType.CAPACITY_INDICATOR.equals(fileContextType)) {
-            Query query = new Query(Criteria.where("file_record_id").is(fileRecord.getId()));
-            CapacityIndicatorInfo existing = mongoTemplate.findOne(query, CapacityIndicatorInfo.class);
-            if (existing != null) {
-                return;
-            }
-            CapacityIndicatorInfo info = new CapacityIndicatorInfo();
-            info.setProjectId(fileRecord.getProjectId());
-            info.setFileRecordId(fileRecord.getId());
-            info.setIsParsed(0);
-            info.preSave();
-            mongoTemplate.save(info);
-            auditPlaceholderCreate(TargetType.CAPACITY_INDICATOR_FORM, info, fileRecord);
-            publish(ProjectDataChangedEvent.capacityIndicatorChanged(info.getProjectId()));
-        } else if (FileContextType.PROJECT_PARTY_SURVEY_SUMMARY.equals(fileContextType)) {
-            Query query = new Query(Criteria.where("file_record_id").is(fileRecord.getId()));
-            ProjectPartySurveySummaryForm existing = mongoTemplate.findOne(query, ProjectPartySurveySummaryForm.class);
-            if (existing != null) {
-                return;
-            }
-            ProjectPartySurveySummaryForm form = new ProjectPartySurveySummaryForm();
-            form.setProjectId(fileRecord.getProjectId());
-            form.setFileRecordId(fileRecord.getId());
-            form.setIsParsed(0);
-            form.setParseStatus("PENDING");
-            form.preSave();
-            mongoTemplate.save(form);
-            auditPlaceholderCreate(TargetType.PROJECT_PARTY_SUMMARY_FORM, form, fileRecord);
-            publish(ProjectDataChangedEvent.projectPartySummaryChanged(form.getProjectId(), form.getId()));
+        FileParseModule module = fileParseModuleRegistry.find(fileContextType);
+        if (module == null) {
+            return;
         }
+        PlaceholderCreated created = module.createPlaceholder(fileRecord, phase);
+        if (created == null) {
+            return;
+        }
+        auditPlaceholderCreate(created.auditTarget(), created.entity(), fileRecord);
+        if (created.syncSurveyContractApproval()) {
+            try {
+                surveyReportContractApprovalSyncService.syncAllSurveyReportsInProject(fileRecord.getProjectId());
+            } catch (Exception ex) {
+                log.warn("同步实测报告合同/批文编号失败 projectId={}", fileRecord.getProjectId(), ex);
+            }
+        }
+        publish(created.event());
     }
 
     private void auditPlaceholderCreate(TargetType targetType, Object entity, FileRecord fileRecord) {

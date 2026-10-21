@@ -30,6 +30,7 @@ landcheck:
       - /auth/register
       - /auth/user-types
       - /favicon.ico
+      - /file/project/*/source-bundle
   llm:
     api:
       key: ${LANDCHECK_LLM_API_KEY}

@@ -32,6 +32,8 @@ public class UploadThreadPool {
     private final ThreadPoolExecutor executor;
     private final ExecutorService callbackExecutor;
     private final ConcurrentHashMap<String, Future<?>> taskFutures = new ConcurrentHashMap<>();
+    /** fileId → taskId：用于僵死扫描跳过仍在后处理中的文件 */
+    private final ConcurrentHashMap<String, String> activeFileTaskIds = new ConcurrentHashMap<>();
 
     public UploadThreadPool(FileProcessingProperties fileProcessingProperties) {
         FileProcessingProperties.Pool pool = fileProcessingProperties.getUploadPool();
@@ -61,16 +63,26 @@ public class UploadThreadPool {
 
     public void submit(FileUploadPostProcessTask task) {
         String taskId = task.getTaskId();
+        String fileId = task.getFileId();
         try {
+            if (fileId != null && !fileId.isBlank()) {
+                activeFileTaskIds.put(fileId, taskId);
+            }
             Future<?> future = executor.submit(ContextPropagating.wrap(task));
             taskFutures.put(taskId, future);
         } catch (RejectedExecutionException e) {
+            if (fileId != null) {
+                activeFileTaskIds.remove(fileId, taskId);
+            }
             log.warn("上传后处理任务提交被拒绝: taskId={}, reason={}", taskId, e.getMessage());
             throw e;
         }
         CompletableFuture.runAsync(ContextPropagating.wrap(() -> {
             Future<?> future = taskFutures.get(taskId);
             if (future == null) {
+                if (fileId != null) {
+                    activeFileTaskIds.remove(fileId, taskId);
+                }
                 return;
             }
             try {
@@ -86,8 +98,16 @@ public class UploadThreadPool {
                 task.onFailure(e);
             } finally {
                 taskFutures.remove(taskId);
+                if (fileId != null) {
+                    activeFileTaskIds.remove(fileId, taskId);
+                }
             }
         }), callbackExecutor);
+    }
+
+    /** 该文件是否仍有进行中的上传后处理任务（含排队与执行中）。 */
+    public boolean isPostProcessActive(String fileId) {
+        return fileId != null && !fileId.isBlank() && activeFileTaskIds.containsKey(fileId);
     }
 
     @PreDestroy

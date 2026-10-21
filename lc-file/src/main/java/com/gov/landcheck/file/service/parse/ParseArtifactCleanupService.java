@@ -31,6 +31,10 @@ import com.gov.landcheck.core.enums.FileContextType;
 import com.gov.landcheck.core.enums.ParseJobStateEnum;
 import com.gov.landcheck.core.service.UnknownUsageRecordService;
 import com.gov.landcheck.file.task.base.TaskData;
+import com.gov.landcheck.file.task.context.FileParseModule;
+import com.gov.landcheck.file.task.context.FileParseModuleRegistry;
+import com.gov.landcheck.file.task.plan.ParsePipelinePlan;
+import com.gov.landcheck.file.task.plan.ParsePipelinePlan.StageDef;
 import com.gov.landcheck.file.task.processor.receiver.PdfPreReceiver;
 import com.gov.landcheck.file.utils.GridFSUtils;
 
@@ -61,6 +65,9 @@ public class ParseArtifactCleanupService {
 
     @Resource
     private ParseFillSnapshotService parseFillSnapshotService;
+
+    @Resource
+    private FileParseModuleRegistry fileParseModuleRegistry;
 
     public void cleanupBeforeMarkFailed(List<ParseJob> hangingJobs) {
         if (hangingJobs == null || hangingJobs.isEmpty()) {
@@ -98,18 +105,35 @@ public class ParseArtifactCleanupService {
             contextType = parseJob.getFileContextType();
         }
 
-        if (contextType == FileContextType.SURVEY_REPORT) {
-            summary.merge(rollbackValidate(taskData));
-        }
-        summary.merge(rollbackFill(taskData));
-        summary.merge(rollbackParse(taskData));
-        if (contextType != FileContextType.PROJECT_PARTY_SURVEY_SUMMARY) {
-            summary.merge(rollbackOcr(taskData));
-            summary.merge(rollbackPreprocess(taskData));
+        List<StageDef> stages = fileParseModuleRegistry.stagesFor(contextType);
+        for (int i = stages.size() - 1; i >= 0; i--) {
+            summary.merge(rollbackStage(stages.get(i).code(), taskData));
         }
 
         clearIntermediateReferences(parseJob, fileRecord, taskData, summary);
         return summary;
+    }
+
+    private ParseRollbackSummary rollbackStage(String stageCode, TaskData taskData) {
+        if (ParsePipelinePlan.VALIDATE.code().equals(stageCode)) {
+            return rollbackValidate(taskData);
+        }
+        if (ParsePipelinePlan.FILL.code().equals(stageCode)) {
+            return rollbackFill(taskData);
+        }
+        if (ParsePipelinePlan.PARSE.code().equals(stageCode)) {
+            return rollbackParse(taskData);
+        }
+        if (ParsePipelinePlan.OCR.code().equals(stageCode)) {
+            return rollbackOcr(taskData);
+        }
+        if (ParsePipelinePlan.PREPROCESS.code().equals(stageCode)) {
+            return rollbackPreprocess(taskData);
+        }
+        ParseRollbackSummary unknown = new ParseRollbackSummary();
+        unknown.recordFailure(stageCode, "解析管道没有该阶段的回滚");
+        log.warn("跳过未知回滚阶段: stage={}", stageCode);
+        return unknown;
     }
 
     public ParseRollbackSummary rollbackPreprocess(TaskData taskData) {
@@ -222,7 +246,7 @@ public class ParseArtifactCleanupService {
         }
         try {
             if (parseFillSnapshotService.restoreIfPresent(taskData)) {
-                publishFillRestoredEvents(taskData.getFileRecord(), taskData);
+                publishFillRestored(taskData);
                 summary.recordSuccess("FILL: 已从落盘快照恢复业务数据");
                 return summary;
             }
@@ -257,168 +281,27 @@ public class ParseArtifactCleanupService {
     }
 
     public void revertFillBusinessState(FileRecord fileRecord, TaskData taskData) {
-        revertFillBusinessStateForContext(fileRecord, taskData);
+        if (fileRecord == null || fileRecord.getFileContextType() == null || fileParseModuleRegistry == null) {
+            return;
+        }
+        FileParseModule module = fileParseModuleRegistry.find(fileRecord.getFileContextType());
+        if (module == null) {
+            return;
+        }
+        module.revertFill(fileRecord, taskData);
     }
 
-    private void revertFillBusinessStateForContext(FileRecord fileRecord, TaskData taskData) {
-        FileContextType contextType = fileRecord.getFileContextType();
-        if (contextType == null) {
+    private void publishFillRestored(TaskData taskData) {
+        if (taskData == null || taskData.getFileRecord() == null
+                || taskData.getFileRecord().getFileContextType() == null
+                || fileParseModuleRegistry == null) {
             return;
         }
-        Long fileRecordId = fileRecord.getId();
-        switch (contextType) {
-            case CONTRACT -> revertContractFill(fileRecordId, taskData);
-            case SURVEY_REPORT -> revertSurveyReportFill(fileRecordId, taskData);
-            case PLANNING_REVIEW -> revertPlanningReviewFill(fileRecordId, fileRecord.getProjectId(), taskData);
-            case CAPACITY_INDICATOR -> revertCapacityIndicatorFill(fileRecordId, fileRecord.getProjectId(), taskData);
-            case PROJECT_PARTY_SURVEY_SUMMARY -> revertProjectPartySummaryFill(fileRecordId, fileRecord.getProjectId(),
-                    taskData);
-            case DATA_FILE, OTHER -> {
-            }
-            default -> {
-            }
-        }
-    }
-
-    private void revertContractFill(Long fileRecordId, TaskData taskData) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        if (taskData != null && taskData.getPreFillContractSnapshot() != null) {
-            ContractInfo snapshot = taskData.getPreFillContractSnapshot();
-            snapshot.setUpdateTime(LocalDateTime.now());
-            mongoTemplate.save(snapshot);
-            if (snapshot.getProjectId() != null && snapshot.getId() != null) {
-                publish(ProjectDataChangedEvent.contractChanged(snapshot.getProjectId(), snapshot.getId()));
-            }
+        FileParseModule module = fileParseModuleRegistry.find(taskData.getFileRecord().getFileContextType());
+        if (module == null) {
             return;
         }
-        if (taskData != null && taskData.isFillCreatedNewContract()) {
-            List<ContractInfo> removed = mongoTemplate.find(query, ContractInfo.class);
-            mongoTemplate.remove(query, ContractInfo.class);
-            for (ContractInfo c : removed) {
-                if (c.getProjectId() != null && c.getId() != null) {
-                    publish(ProjectDataChangedEvent.contractChanged(c.getProjectId(), c.getId()));
-                }
-            }
-            return;
-        }
-        log.warn("合同回填回滚跳过（无快照且非本次新建，避免离线误删）: fileRecordId={}", fileRecordId);
-    }
-
-    private void revertSurveyReportFill(Long fileRecordId, TaskData taskData) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        if (taskData != null && taskData.getPreFillSurveySnapshot() != null) {
-            SurveyReportInfo snapshot = taskData.getPreFillSurveySnapshot();
-            snapshot.setUpdateTime(LocalDateTime.now());
-            mongoTemplate.save(snapshot);
-            if (taskData.getPreFillRoomsSnapshot() != null) {
-                mongoTemplate.remove(query, RoomInfo.class);
-                List<RoomInfo> roomSnapshots = taskData.getPreFillRoomsSnapshot();
-                if (!roomSnapshots.isEmpty()) {
-                    List<RoomInfo> copies = copyRoomSnapshots(roomSnapshots);
-                    LocalDateTime now = LocalDateTime.now();
-                    for (RoomInfo room : copies) {
-                        room.setUpdateTime(now);
-                    }
-                    mongoTemplate.insertAll(copies);
-                }
-            }
-            if (snapshot.getProjectId() != null && snapshot.getId() != null) {
-                publish(ProjectDataChangedEvent.surveyReportChanged(snapshot.getProjectId(), snapshot.getId(), true));
-            }
-            return;
-        }
-        if (taskData != null && taskData.isFillCreatedNewSurvey()) {
-            List<SurveyReportInfo> removed = mongoTemplate.find(query, SurveyReportInfo.class);
-            mongoTemplate.remove(query, RoomInfo.class);
-            mongoTemplate.remove(query, SurveyReportInfo.class);
-            for (SurveyReportInfo sr : removed) {
-                if (sr.getProjectId() != null && sr.getId() != null) {
-                    publish(ProjectDataChangedEvent.surveyReportChanged(sr.getProjectId(), sr.getId(), true));
-                }
-            }
-            return;
-        }
-        log.warn("实测回填回滚跳过（无快照且非本次新建，避免离线误删户室）: fileRecordId={}", fileRecordId);
-    }
-
-    private void revertPlanningReviewFill(Long fileRecordId, Long projectId, TaskData taskData) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-        Query rowQuery = new Query(Criteria.where("file_record_id").is(fileRecordId));
-
-        if (taskData != null && taskData.getPreFillPlanningFormSnapshot() != null) {
-            PlanningReviewForm snapshot = taskData.getPreFillPlanningFormSnapshot();
-            snapshot.setUpdateTime(LocalDateTime.now());
-            mongoTemplate.save(snapshot);
-            mongoTemplate.remove(rowQuery, PlanningReviewRow.class);
-            List<PlanningReviewRow> rowSnapshots = taskData.getPreFillPlanningRowsSnapshot();
-            if (rowSnapshots != null && !rowSnapshots.isEmpty()) {
-                List<PlanningReviewRow> copies = copyPlanningRowSnapshots(rowSnapshots);
-                LocalDateTime now = LocalDateTime.now();
-                for (PlanningReviewRow row : copies) {
-                    row.setUpdateTime(now);
-                }
-                mongoTemplate.insertAll(copies);
-            }
-            if (projectId != null) {
-                publish(ProjectDataChangedEvent.planningReviewChanged(projectId));
-            }
-            return;
-        }
-        if (taskData != null && taskData.isFillCreatedNewPlanningForm()) {
-            mongoTemplate.remove(rowQuery, PlanningReviewRow.class);
-            mongoTemplate.remove(query, PlanningReviewForm.class);
-            if (projectId != null) {
-                publish(ProjectDataChangedEvent.planningReviewChanged(projectId));
-            }
-            return;
-        }
-        log.warn("规划复核回填回滚跳过（无快照且非本次新建）: fileRecordId={}", fileRecordId);
-    }
-
-    private void revertCapacityIndicatorFill(Long fileRecordId, Long projectId, TaskData taskData) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-
-        if (taskData != null && taskData.getPreFillCapacitySnapshot() != null) {
-            CapacityIndicatorInfo snapshot = taskData.getPreFillCapacitySnapshot();
-            snapshot.setUpdateTime(LocalDateTime.now());
-            mongoTemplate.save(snapshot);
-            if (projectId != null) {
-                publish(ProjectDataChangedEvent.capacityIndicatorChanged(projectId));
-            }
-            return;
-        }
-        if (taskData != null && taskData.isFillCreatedNewCapacity()) {
-            mongoTemplate.remove(query, CapacityIndicatorInfo.class);
-            if (projectId != null) {
-                publish(ProjectDataChangedEvent.capacityIndicatorChanged(projectId));
-            }
-            return;
-        }
-        log.warn("容量指标回填回滚跳过（无快照且非本次新建）: fileRecordId={}", fileRecordId);
-    }
-
-    private void revertProjectPartySummaryFill(Long fileRecordId, Long projectId, TaskData taskData) {
-        Query query = new Query(Criteria.where("file_record_id").is(fileRecordId));
-
-        if (taskData != null && taskData.getPreFillPartySummarySnapshot() != null) {
-            ProjectPartySurveySummaryForm snapshot = taskData.getPreFillPartySummarySnapshot();
-            snapshot.setUpdateTime(LocalDateTime.now());
-            mongoTemplate.save(snapshot);
-            if (snapshot.getProjectId() != null && snapshot.getId() != null) {
-                publish(ProjectDataChangedEvent.projectPartySummaryChanged(snapshot.getProjectId(), snapshot.getId()));
-            } else if (projectId != null) {
-                publish(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, null));
-            }
-            return;
-        }
-        if (taskData != null && taskData.isFillCreatedNewPartySummary()) {
-            mongoTemplate.remove(query, ProjectPartySurveySummaryForm.class);
-            if (projectId != null) {
-                publish(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, null));
-            }
-            return;
-        }
-        log.warn("项目方汇总回填回滚跳过（无快照且非本次新建）: fileRecordId={}", fileRecordId);
+        module.publishFillRestored(taskData.getFileRecord(), taskData);
     }
 
     public void revertValidateBusinessState(FileRecord fileRecord) {
@@ -738,52 +621,5 @@ public class ParseArtifactCleanupService {
         copy.setBuildableResidentialArea(source.getBuildableResidentialArea());
         copy.setDifferenceResidentialArea(source.getDifferenceResidentialArea());
         return copy;
-    }
-
-    private void publishFillRestoredEvents(FileRecord fileRecord, TaskData taskData) {
-        if (fileRecord == null || fileRecord.getFileContextType() == null) {
-            return;
-        }
-        Long projectId = fileRecord.getProjectId();
-        switch (fileRecord.getFileContextType()) {
-            case CONTRACT -> {
-                ContractInfo snapshot = taskData != null ? taskData.getPreFillContractSnapshot() : null;
-                if (snapshot != null && snapshot.getProjectId() != null && snapshot.getId() != null) {
-                    publish(ProjectDataChangedEvent.contractChanged(snapshot.getProjectId(), snapshot.getId()));
-                } else if (projectId != null) {
-                    publish(ProjectDataChangedEvent.contractChanged(projectId, null));
-                }
-            }
-            case SURVEY_REPORT -> {
-                SurveyReportInfo snapshot = taskData != null ? taskData.getPreFillSurveySnapshot() : null;
-                if (snapshot != null && snapshot.getProjectId() != null && snapshot.getId() != null) {
-                    publish(ProjectDataChangedEvent.surveyReportChanged(snapshot.getProjectId(), snapshot.getId(),
-                            true));
-                } else if (projectId != null) {
-                    publish(ProjectDataChangedEvent.surveyReportChanged(projectId, null, true));
-                }
-            }
-            case PLANNING_REVIEW -> {
-                if (projectId != null) {
-                    publish(ProjectDataChangedEvent.planningReviewChanged(projectId));
-                }
-            }
-            case CAPACITY_INDICATOR -> {
-                if (projectId != null) {
-                    publish(ProjectDataChangedEvent.capacityIndicatorChanged(projectId));
-                }
-            }
-            case PROJECT_PARTY_SURVEY_SUMMARY -> {
-                ProjectPartySurveySummaryForm snapshot = taskData != null ? taskData.getPreFillPartySummarySnapshot()
-                        : null;
-                if (snapshot != null && snapshot.getProjectId() != null && snapshot.getId() != null) {
-                    publish(ProjectDataChangedEvent.projectPartySummaryChanged(snapshot.getProjectId(), snapshot.getId()));
-                } else if (projectId != null) {
-                    publish(ProjectDataChangedEvent.projectPartySummaryChanged(projectId, null));
-                }
-            }
-            default -> {
-            }
-        }
     }
 }
